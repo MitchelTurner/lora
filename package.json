@@ -1,0 +1,12 @@
+{
+  "name": "lora-forge",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:api": "npm run start:dev -w @lora-forge/api",
+    "dev:web": "npm run dev -w @lora-forge/web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "prisma:validate": "npm run prisma:validate -w @lora-forge/api"
+  }
+}

@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BaseModel {
+  SDXL
+  FLUX1_DEV
+}
+
+enum LoraType {
+  CHARACTER
+  STYLE
+  OBJECT
+}
+
+enum ProjectStatus {
+  DRAFT
+  READY
+  TRAINING
+  COMPLETED
+  FAILED
+}
+
+enum JobStatus {
+  queued
+  preprocessing
+  training
+  succeeded
+  failed
+  canceled
+}
+
+enum ArtifactType {
+  lora
+  sample
+  config
+  dataset_zip
+}
+
+model User {
+  id        String            @id @default(cuid())
+  email     String            @unique
+  createdAt DateTime          @default(now())
+  projects  TrainingProject[]
+}
+
+model TrainingProject {
+  id          String         @id @default(cuid())
+  userId      String
+  name        String
+  baseModel   BaseModel
+  loraType    LoraType
+  triggerWord String
+  status      ProjectStatus  @default(DRAFT)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  /// Datasets are purged from storage after this time (retention cleanup job).
+  expiresAt   DateTime?
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images      DatasetImage[]
+  jobs        TrainingJob[]
+
+  @@index([userId])
+}
+
+model DatasetImage {
+  id         String          @id @default(cuid())
+  projectId  String
+  storageKey String          @unique
+  width      Int
+  height     Int
+  sizeBytes  Int
+  /// 64-bit perceptual hash, hex encoded.
+  phash      String?
+  caption    String          @default("")
+  /// { x, y, width, height } in source pixels, or focus point.
+  cropBox    Json?
+  excluded   Boolean         @default(false)
+  /// Set by the duplicate detector when phash is near another image.
+  duplicateOfId String?
+  /// Result of the NSFW / minor detection check; blocks training when true.
+  safetyFlagged Boolean      @default(false)
+  createdAt  DateTime        @default(now())
+  project    TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([phash])
+}
+
+model TrainingJob {
+  id             String             @id @default(cuid())
+  projectId      String
+  configJson     Json
+  status         JobStatus          @default(queued)
+  progress       Float              @default(0)
+  currentStep    Int                @default(0)
+  totalSteps     Int                @default(0)
+  loss           Float?
+  providerJobId  String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  errorMessage   String?
+  /// Content-safety confirmation (ownership / consent), logged with the job.
+  consentConfirmedAt DateTime
+  consentStatement   String
+  createdAt      DateTime           @default(now())
+  project        TrainingProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artifacts      TrainingArtifact[]
+  webhookEvents  WebhookEvent[]
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model TrainingArtifact {
+  id         String       @id @default(cuid())
+  jobId      String
+  type       ArtifactType
+  storageKey String
+  sizeBytes  BigInt
+  sha256     String
+  createdAt  DateTime     @default(now())
+  job        TrainingJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+/// Idempotency record: each worker callback carries a unique eventId.
+model WebhookEvent {
+  id         String      @id @default(cuid())
+  jobId      String
+  eventId    String      @unique
+  receivedAt DateTime    @default(now())
+  job        TrainingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
