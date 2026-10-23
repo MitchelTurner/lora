@@ -1,0 +1,10 @@
+[build]
+builder = "RAILPACK"
+buildCommand = "sh -c 'if [ -f apps/web/package.json ]; then npm run build --workspace=@lora-forge/shared && npm run build --workspace=@lora-forge/web; else npm run build; fi'"
+watchPatterns = ["apps/web/**", "packages/shared/**", "package.json", "package-lock.json"]
+
+[deploy]
+startCommand = "sh -c 'if [ -f apps/web/package.json ]; then npm run start --workspace=@lora-forge/web; else npm start; fi'"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
