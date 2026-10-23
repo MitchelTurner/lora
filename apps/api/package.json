@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "start:dev": "ts-node src/main.ts",
@@ -11,6 +11,6 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
-  "dependencies": { "@prisma/client": "^5.22.0", "@lora-forge/shared": "*" },
+  "dependencies": { "@prisma/client": "^5.22.0" },
   "devDependencies": { "prisma": "^5.22.0", "typescript": "^5.4.0", "ts-node": "^10.9.2", "@types/node": "^20.0.0" }
 }
