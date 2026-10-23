@@ -6,6 +6,7 @@
     "dev:api": "npm run start:dev -w @lora-forge/api",
     "dev:web": "npm run dev -w @lora-forge/web",
     "build": "npm run build --workspaces --if-present",
+    "start": "npm run start -w @lora-forge/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "prisma:validate": "npm run prisma:validate -w @lora-forge/api"
   }

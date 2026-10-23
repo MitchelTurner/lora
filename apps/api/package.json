@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
     "start:dev": "ts-node src/main.ts",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
