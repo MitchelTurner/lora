@@ -66,8 +66,7 @@ function sendText(res, status, body) {
   res.end(body);
 }
 
-const port = listenPort();
-const server = createServer((req, res) => {
+function handle(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     sendText(res, 405, 'Method not allowed');
     return;
@@ -114,15 +113,32 @@ const server = createServer((req, res) => {
     return;
   }
   sendFile(res, indexFile);
-});
+}
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`Web listening on http://0.0.0.0:${port}`);
-});
+const ports = [...new Set([listenPort(), 8080, 3000, 4173, 5173, 80])];
+const servers = [];
+
+for (const listen of ports) {
+  const server = createServer(handle);
+  server.on('error', (error) => {
+    console.error(`Not listening on ${listen}: ${error.message}`);
+  });
+  server.listen(listen, '0.0.0.0', () => {
+    console.log(`Web listening on http://0.0.0.0:${listen}`);
+    servers.push(server);
+  });
+}
 
 function shutdown(signal) {
   console.log(`Received ${signal}, closing server`);
-  server.close(() => process.exit(0));
+  if (servers.length === 0) process.exit(0);
+  let closed = 0;
+  for (const server of servers) {
+    server.close(() => {
+      closed += 1;
+      if (closed === servers.length) process.exit(0);
+    });
+  }
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
