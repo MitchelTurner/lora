@@ -53,19 +53,25 @@ export function Hint({
 }) {
   const id = React.useId();
   const rootRef = React.useRef<HTMLElement>(null);
+  const tipRef = React.useRef<HTMLSpanElement>(null);
   const [above, setAbove] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const place = align === 'end' ? 'right-0' : 'left-0';
   const vertical = above ? 'bottom-full mb-2' : 'top-full mt-2';
 
-  function show() {
+  React.useLayoutEffect(() => {
+    if (!open || above) return;
     const node = rootRef.current;
-    if (node) {
-      const rect = node.getBoundingClientRect();
-      const below = window.innerHeight - rect.bottom;
-      const aboveRoom = rect.top;
-      setAbove(below < 160 && aboveRoom > below);
-    }
+    const tip = tipRef.current;
+    if (!node || !tip) return;
+    const rect = node.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom;
+    const needed = tip.offsetHeight + 12;
+    if (below < needed && rect.top > below) setAbove(true);
+  }, [open, above]);
+
+  function show() {
+    setAbove(false);
     setOpen(true);
   }
 
@@ -86,8 +92,9 @@ export function Hint({
       {children(id)}
       <span id={id} className="sr-only">{hint}</span>
       <span
+        ref={tipRef}
         aria-hidden="true"
-        className={`pointer-events-none absolute ${place} ${vertical} z-30 w-72 max-w-[min(18rem,calc(100vw-3rem))] rounded-2xl bg-ink px-3 py-2 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-paper shadow-[0_12px_40px_rgba(27,25,20,0.18)] transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}
+        className={`pointer-events-none absolute ${place} ${vertical} z-30 w-72 max-w-[min(18rem,calc(100vw-3rem))] rounded-2xl bg-ink px-3 py-2 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-paper shadow-[0_12px_40px_rgba(27,25,20,0.18)] ${open ? 'opacity-100' : 'opacity-0'}`}
       >
         {hint}
       </span>
