@@ -1,7 +1,11 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const apiUpstream = process.env.API_UPSTREAM
+  || (process.env.RAILWAY_ENVIRONMENT ? 'https://lora-forgeapi-production.up.railway.app' : 'http://127.0.0.1:3000');
 
 const dist = fileURLToPath(new URL('./dist/', import.meta.url));
 const indexFile = join(dist, 'index.html');
@@ -66,19 +70,43 @@ function sendText(res, status, body) {
   res.end(body);
 }
 
+function proxyApi(req, res) {
+  const target = new URL(apiUpstream);
+  const lib = target.protocol === 'https:' ? httpsRequest : httpRequest;
+  const headers = { ...req.headers, host: target.host };
+  const upstream = lib({
+    protocol: target.protocol,
+    hostname: target.hostname,
+    port: target.port || (target.protocol === 'https:' ? 443 : 80),
+    method: req.method,
+    path: req.url,
+    headers,
+  }, (up) => {
+    res.writeHead(up.statusCode || 502, up.headers);
+    up.pipe(res);
+  });
+  upstream.on('error', () => {
+    if (!res.headersSent) sendText(res, 502, 'The LoRA service is unavailable.');
+  });
+  req.pipe(upstream);
+}
+
 function handle(req, res) {
+  const urlPath = requestPath(req.url);
+  if (urlPath === '/health') {
+    sendText(res, 200, 'ok');
+    return;
+  }
+  if (urlPath === '/api' || urlPath.startsWith('/api/')) {
+    proxyApi(req, res);
+    return;
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     sendText(res, 405, 'Method not allowed');
     return;
   }
   if (!existsSync(indexFile)) {
     sendText(res, 500, 'Web build not found. Run npm run build before starting.');
-    return;
-  }
-
-  const urlPath = requestPath(req.url);
-  if (urlPath === '/health') {
-    sendText(res, 200, 'ok');
     return;
   }
 
@@ -119,7 +147,14 @@ const ports = [...new Set([listenPort(), 8080, 3000, 4173, 5173, 80])];
 const servers = [];
 
 for (const listen of ports) {
-  const server = createServer(handle);
+  const server = createServer((req, res) => {
+    try {
+      handle(req, res);
+    } catch (error) {
+      console.error(error);
+      if (!res.headersSent) sendText(res, 500, 'The LoRA site hit an unexpected error.');
+    }
+  });
   server.on('error', (error) => {
     console.error(`Not listening on ${listen}: ${error.message}`);
   });

@@ -11,6 +11,17 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
-  "dependencies": { "@prisma/client": "^5.22.0" },
-  "devDependencies": { "prisma": "^5.22.0", "typescript": "^5.4.0", "ts-node": "^10.9.2", "@types/node": "^20.0.0" }
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "archiver": "^8.0.0",
+    "busboy": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^8.0.0",
+    "@types/busboy": "^1.5.5",
+    "@types/node": "^20.0.0",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
 }

@@ -3,3 +3,5 @@ dist
 .env
 __pycache__
 *.safetensors
+data
+apps/api/data
