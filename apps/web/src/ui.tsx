@@ -38,6 +38,38 @@ export function ErrorNote({ children }: { children: React.ReactNode }) {
   return <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{children}</p>;
 }
 
+export function Hint({
+  hint,
+  children,
+  className = '',
+  align = 'start',
+  inline = false,
+}: {
+  hint: string;
+  children: (describedBy: string) => React.ReactNode;
+  className?: string;
+  align?: 'start' | 'end';
+  inline?: boolean;
+}) {
+  const id = React.useId();
+  const place = align === 'end' ? 'right-0' : 'left-0';
+  const Tag = inline ? 'span' : 'div';
+  return (
+    <Tag className={`${inline ? 'inline-block' : ''} group/hint relative hover:z-30 focus-within:z-30 ${className}`}>
+      {children(id)}
+      <span id={id} className="sr-only">{hint}</span>
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute ${place} top-full z-30 mt-2 w-72 max-w-[min(18rem,calc(100vw-3rem))] rounded-2xl bg-ink px-3 py-2 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-paper opacity-0 shadow-[0_12px_40px_rgba(27,25,20,0.18)] transition-opacity duration-150 group-hover/hint:opacity-100 group-focus-within/hint:opacity-100`}
+      >
+        {hint}
+      </span>
+    </Tag>
+  );
+}
+
+export const hintLabel = 'underline decoration-dotted decoration-ink/30 underline-offset-4';
+
 export const STATUS_LABEL: Record<string, string> = {
   DRAFT: 'Add photos',
   READY: 'Ready to train',
@@ -56,3 +88,34 @@ export const MODEL_LABEL: Record<string, string> = {
   SDXL: 'SDXL',
   FLUX1_DEV: 'Flux',
 };
+
+export const STATUS_HINT: Record<string, string> = {
+  DRAFT: 'This LoRA still needs photos. Add at least 5 included photos before you can submit training.',
+  READY: 'At least 5 photos are included. You can submit training whenever you are ready.',
+  TRAINING: 'Training is waiting for a GPU worker. Your photos stay here, and the LoRA file appears when the run finishes.',
+  COMPLETED: 'Training finished. Open this LoRA to download the model file.',
+  FAILED: 'Training did not finish. Open this LoRA to see what needs another try.',
+};
+
+export const TYPE_HINT: Record<string, string> = {
+  CHARACTER: 'Teaches the model one face or character. Use photos of the same person from several angles and in different light.',
+  STYLE: 'Teaches a look, such as a painting style or a kind of photograph. The subject can change from picture to picture.',
+  OBJECT: 'Teaches one product, pet, or thing. Photograph that thing from more than one angle, and leave out pictures where it is hard to see.',
+};
+
+export const MODEL_HINT: Record<string, string> = {
+  SDXL: 'Choose SDXL if you make images in Forge, ComfyUI, or Automatic1111 with an SDXL checkpoint. This LoRA will not load on Flux.',
+  FLUX1_DEV: 'Choose Flux if your image workflow is Flux. This LoRA will not load on an SDXL checkpoint.',
+};
+
+export const NAME_HINT = 'The title on your dashboard. Use any name you will recognize. This is separate from the trigger word you type in a prompt.';
+export const TRIGGER_HINT = 'The word you type in a prompt to turn this LoRA on. Make it unique, like maraface, so it does not collide with ordinary words. Letters and numbers only, and it has to start with a letter.';
+export const CAPTION_HINT = 'A short description of this photo. Training reads it to learn what is in the picture. It starts as your trigger word, and you can make it more specific.';
+export const LEAVE_OUT_HINT = 'Keeps this photo in the project but skips it for training and for the download.';
+export const USE_PHOTO_HINT = 'Puts this photo back into training and into the download.';
+export const REMOVE_HINT = 'Deletes this photo from the project. This does not affect the other photos.';
+export const DOWNLOAD_HINT = 'Saves a zip of the included photos, their captions, and a small lora.json file. The trained .safetensors file is added here only after training finishes.';
+export const CONSENT_HINT = 'Required before training. Confirm that you took these photos, or that you have permission to train a model on them.';
+export const TRAIN_HINT = 'Queues training on the included photos. You need at least 5 photos and the permission checkbox. The LoRA file appears on this page when a GPU worker finishes.';
+export const DELETE_HINT = 'Removes this LoRA, its photos, and its download from your dashboard.';
+export const COUNT_HINT = 'Included photos are the ones used for training and the zip. Uploaded counts every photo, including ones you left out. A project holds up to 50.';

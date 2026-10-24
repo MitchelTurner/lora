@@ -1,6 +1,6 @@
 import React from 'react';
 import { listProjects, type ProjectSummary } from './api';
-import { ErrorNote, MODEL_LABEL, STATUS_LABEL, TYPE_LABEL } from './ui';
+import { ErrorNote, Hint, MODEL_LABEL, STATUS_HINT, STATUS_LABEL, TYPE_LABEL } from './ui';
 
 export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; onCreate: () => void }) {
   const [projects, setProjects] = React.useState<ProjectSummary[] | null>(null);
@@ -52,8 +52,8 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
       <ul className="grid gap-4 sm:grid-cols-2">
         {projects.map((project) => (
           <li key={project.id}>
-            <button type="button" onClick={() => onOpen(project.id)} className="flex h-full w-full flex-col overflow-hidden rounded-3xl border border-line bg-card text-left hover:border-moss/40">
-              <div className="grid h-36 grid-cols-4 bg-paper">
+            <button type="button" onClick={() => onOpen(project.id)} className="flex h-full w-full flex-col rounded-3xl border border-line bg-card text-left hover:border-moss/40">
+              <div className="grid h-36 grid-cols-4 overflow-hidden rounded-t-3xl bg-paper">
                 {project.previews.length === 0 && <div className="col-span-4 flex items-center justify-center text-sm text-ink/40">No photos yet</div>}
                 {project.previews.map((preview) => (
                   <img key={preview.id} src={preview.url} alt="" className="h-full w-full object-cover" />
@@ -62,7 +62,9 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
               <div className="flex flex-1 flex-col gap-3 p-5">
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="font-serif text-2xl leading-tight">{project.name}</h2>
-                  <span className="shrink-0 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-moss">{STATUS_LABEL[project.status]}</span>
+                  <Hint inline hint={STATUS_HINT[project.status] ?? 'Where this LoRA is in the process.'}>
+                    {(describedBy) => <span aria-describedby={describedBy} className="shrink-0 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-moss underline decoration-dotted decoration-moss/40 underline-offset-2">{STATUS_LABEL[project.status]}</span>}
+                  </Hint>
                 </div>
                 <p className="text-sm text-ink/65">{TYPE_LABEL[project.loraType]} · {MODEL_LABEL[project.baseModel]} · {project.includedCount} photos</p>
                 <p className="text-sm text-ink/50">Trigger word <span className="font-semibold text-ink">{project.triggerWord}</span></p>
