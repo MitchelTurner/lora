@@ -70,7 +70,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <Hint inline hint={STATUS_HINT[project.status] ?? 'Where this LoRA is in the process.'}>
-            {(describedBy) => <p aria-describedby={describedBy} className={`text-sm font-semibold uppercase tracking-[0.14em] text-moss ${hintLabel}`}>{STATUS_LABEL[project.status]}</p>}
+            {(describedBy) => <span aria-describedby={describedBy} className={`text-sm font-semibold uppercase tracking-[0.14em] text-moss ${hintLabel}`}>{STATUS_LABEL[project.status]}</span>}
           </Hint>
           <h1 className="mt-1 font-serif text-5xl tracking-tight">{project.name}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-x-2 text-ink/70">
@@ -154,7 +154,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
 
       <section className="mt-8 grid gap-4 rounded-[2rem] border border-line bg-card p-6 md:grid-cols-2">
         <div>
-          <Hint inline hint={DOWNLOAD_HINT}>
+          <Hint hint={DOWNLOAD_HINT}>
             {(describedBy) => <h2 aria-describedby={describedBy} className={`font-serif text-3xl ${hintLabel}`}>Download</h2>}
           </Hint>
           <p className="mt-2 text-sm leading-relaxed text-ink/70">
@@ -169,7 +169,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
           </Hint>
         </div>
         <div>
-          <Hint inline hint={TRAIN_HINT}>
+          <Hint hint={TRAIN_HINT}>
             {(describedBy) => <h2 aria-describedby={describedBy} className={`font-serif text-3xl ${hintLabel}`}>Train</h2>}
           </Hint>
           {queued ? (
