@@ -124,7 +124,7 @@ for (const listen of ports) {
     console.error(`Not listening on ${listen}: ${error.message}`);
   });
   server.listen(listen, '0.0.0.0', () => {
-    console.log(`Web listening on http://0.0.0.0:${listen}`);
+    console.log(`LoRA Forge web listening on http://0.0.0.0:${listen}`);
     servers.push(server);
   });
 }
