@@ -70,10 +70,21 @@ function sendText(res, status, body) {
   res.end(body);
 }
 
+function forwardHeaders(source) {
+  const skip = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'proxy-connection', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
+  const connection = source.connection;
+  if (typeof connection === 'string') {
+    for (const name of connection.split(',')) skip.add(name.trim().toLowerCase());
+  }
+  const headers = { ...source };
+  for (const name of skip) delete headers[name];
+  return headers;
+}
+
 function proxyApi(req, res) {
   const target = new URL(apiUpstream);
   const lib = target.protocol === 'https:' ? httpsRequest : httpRequest;
-  const headers = { ...req.headers, host: target.host };
+  const headers = { ...forwardHeaders(req.headers), host: target.host };
   const upstream = lib({
     protocol: target.protocol,
     hostname: target.hostname,
@@ -82,7 +93,7 @@ function proxyApi(req, res) {
     path: req.url,
     headers,
   }, (up) => {
-    res.writeHead(up.statusCode || 502, up.headers);
+    res.writeHead(up.statusCode || 502, forwardHeaders(up.headers));
     up.pipe(res);
   });
   upstream.on('error', () => {

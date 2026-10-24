@@ -9,6 +9,7 @@ import {
   MAX_IMAGES,
   absolutePath,
   createProject,
+  dataDir,
   deleteImage,
   deleteProject,
   getProject,
@@ -81,6 +82,12 @@ function isBaseModel(value: unknown): value is BaseModel {
 
 function isLoraType(value: unknown): value is LoraType {
   return typeof value === 'string' && (LORA_TYPES as readonly string[]).includes(value);
+}
+
+function isHeic(buffer: Buffer): boolean {
+  if (buffer.length < 12 || buffer.toString('ascii', 4, 8) !== 'ftyp') return false;
+  const brand = buffer.toString('ascii', 8, 12);
+  return ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'].includes(brand);
 }
 
 function sniffImage(buffer: Buffer): { mime: string; width: number; height: number } | undefined {
@@ -344,9 +351,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
     const saved = [];
+    let sawHeic = false;
     for (const upload of uploads) {
       const sniffed = sniffImage(upload.buffer);
-      if (!sniffed) continue;
+      if (!sniffed) {
+        if (isHeic(upload.buffer)) sawHeic = true;
+        continue;
+      }
       saved.push(await saveImage(project.id, {
         filename: upload.filename,
         mime: sniffed.mime,
@@ -356,7 +367,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       }));
     }
     if (saved.length === 0) {
-      sendError(res, 400, 'None of those files were JPG, PNG, or WebP photos.');
+      sendError(res, 400, sawHeic
+        ? 'Those are iPhone HEIC photos. Save them as JPG, PNG, or WebP and add them again.'
+        : 'None of those files were JPG, PNG, or WebP photos.');
       return;
     }
     const updated = getProject(project.id);
@@ -420,6 +433,7 @@ const server = createServer((req, res) => {
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`API listening on http://0.0.0.0:${port}`);
+  console.log(`Photos stored in ${dataDir()}`);
 });
 
 function shutdown(signal: string): void {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { captionHelp, deletePhoto, deleteProject, downloadUrl, getProject, submitTraining, suggestCaption, updatePhoto, uploadPhotos, type ProjectDetail } from './api';
+import { preparePhotos } from './photos';
 import { CAPTION_HINT, CONSENT_HINT, COUNT_HINT, DELETE_HINT, DOWNLOAD_HINT, ErrorNote, Hint, LEAVE_OUT_HINT, MODEL_HINT, MODEL_LABEL, REMOVE_HINT, STATUS_HINT, STATUS_LABEL, SUGGEST_ALL_HINT, SUGGEST_HINT, SUGGEST_OFF_HINT, TRAIN_HINT, TRIGGER_HINT, TYPE_HINT, TYPE_LABEL, USE_PHOTO_HINT, hintLabel } from './ui';
 
 const MIN_PHOTOS = 5;
@@ -8,12 +9,14 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   const [project, setProject] = React.useState<ProjectDetail | null>(null);
   const [error, setError] = React.useState('');
   const [uploading, setUploading] = React.useState(false);
+  const [uploadNote, setUploadNote] = React.useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
   const [consent, setConsent] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false);
   const [captionHelpOn, setCaptionHelpOn] = React.useState<boolean | null>(null);
   const [suggesting, setSuggesting] = React.useState<string | null>(null);
-  const inputRef = React.useRef<HTMLInputElement>(null);
+  const photosRef = React.useRef<HTMLUListElement>(null);
+  const uploadRef = React.useRef<(list: FileList | File[]) => void>(() => {});
 
   async function reload() {
     setProject(await getProject(id));
@@ -78,26 +81,85 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
     return () => { active = false; };
   }, [id]);
 
+  const scrollPhotos = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!scrollPhotos.current || !photosRef.current) return;
+    scrollPhotos.current = false;
+    photosRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [project]);
+
   async function addFiles(list: FileList | File[]) {
-    const files = Array.from(list).filter((file) => file.type.startsWith('image/'));
-    if (files.length === 0) {
-      setError('Choose JPG, PNG, or WebP photos.');
+    const chosen = Array.from(list);
+    if (chosen.length === 0) {
+      setUploadNote({ tone: 'bad', text: 'No photo was added. Choose a JPG, PNG, or WebP.' });
       return;
     }
     setUploading(true);
     setError('');
+    setUploadNote(null);
     try {
-      const result = await uploadPhotos(id, files);
-      setProject(result.project);
-      if (result.added < files.length) {
-        setError(`Added ${result.added} photo${result.added === 1 ? '' : 's'}. The rest were not JPG, PNG, or WebP files under 15 MB.`);
+      const prepared = await preparePhotos(chosen);
+      const skipped = prepared.skippedHeic + prepared.skippedOther;
+      if (prepared.files.length === 0) {
+        setUploadNote({
+          tone: 'bad',
+          text: prepared.skippedHeic > 0
+            ? 'These are iPhone HEIC photos, so they were not added. Save them as JPG and try again. On iPhone, set Settings → Camera → Formats to Most Compatible.'
+            : 'Choose JPG, PNG, or WebP photos.',
+        });
+        return;
       }
+      const result = await uploadPhotos(id, prepared.files);
+      const next = result.project?.images ? result.project : await getProject(id);
+      setProject(next);
+      const added = result.added ?? next.images.length;
+      const missed = prepared.files.length - added;
+      if (added < 1) {
+        setUploadNote({ tone: 'bad', text: 'Those photos were not added. Use JPG, PNG, or WebP under 15 MB each.' });
+        return;
+      }
+      const noun = added === 1 ? 'photo' : 'photos';
+      let text = `Added ${added} ${noun}.`;
+      if (skipped > 0 || missed > 0) {
+        const leftOut = skipped + Math.max(missed, 0);
+        text += prepared.skippedHeic > 0
+          ? ` ${leftOut} file${leftOut === 1 ? '' : 's'} were left out. HEIC photos need to be saved as JPG.`
+          : ` ${leftOut} file${leftOut === 1 ? '' : 's'} were left out because they were not JPG, PNG, or WebP under 15 MB.`;
+      } else {
+        text += added === 1 ? ' It is listed below.' : ' They are listed below.';
+      }
+      setUploadNote({ tone: 'ok', text });
+      scrollPhotos.current = true;
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'Upload failed.');
+      setUploadNote({ tone: 'bad', text: reason instanceof Error ? reason.message : 'Upload failed.' });
     } finally {
       setUploading(false);
     }
   }
+
+  uploadRef.current = (list) => { void addFiles(list); };
+
+  React.useEffect(() => {
+    function hasFiles(event: DragEvent) {
+      return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    }
+    function onDragOver(event: DragEvent) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+    }
+    function onDrop(event: DragEvent) {
+      if (event.defaultPrevented || !event.dataTransfer?.files?.length) return;
+      event.preventDefault();
+      uploadRef.current(event.dataTransfer.files);
+    }
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, []);
 
   async function train() {
     setSubmitting(true);
@@ -157,28 +219,50 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
       >
         <h2 className="font-serif text-3xl">Add the photos</h2>
         <p className="mx-auto mt-2 max-w-md text-ink/70">Drop them here or browse. Ten to twenty pictures, with different angles and lighting, train a steadier LoRA.</p>
-        <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading} className="mt-5 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper disabled:opacity-60">
-          {uploading ? 'Uploading…' : 'Browse photos'}
-        </button>
-        <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }} />
-        <Hint inline hint={COUNT_HINT} className="mt-3">
-          {(describedBy) => <p aria-describedby={describedBy} className={`text-xs text-ink/45 ${hintLabel}`}>{readyCount} included · {project.imageCount} uploaded · 50 max</p>}
-        </Hint>
-        {project.images.length > 0 && (
-          <Hint hint={captionHelpOn === false ? SUGGEST_OFF_HINT : SUGGEST_ALL_HINT} className="mt-4 inline-block">
-            {(describedBy) => (
-              <button type="button" aria-describedby={describedBy} disabled={suggesting !== null} onClick={() => void suggestUntouched()} className={`rounded-full border border-moss px-4 py-2 text-sm font-semibold text-moss disabled:opacity-50 ${hintLabel}`}>
-                {suggesting ? 'Writing captions…' : 'Suggest captions with AI'}
-              </button>
-            )}
+        <div className="mt-5 flex flex-col items-center gap-4">
+          <div className={`relative ${uploading ? 'opacity-60' : ''}`}>
+            <span aria-hidden="true" className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper">
+              {uploading ? 'Adding photos…' : 'Browse photos'}
+            </span>
+            <input
+              type="file"
+              accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp"
+              multiple
+              disabled={uploading}
+              aria-label="Browse photos"
+              className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
+              onChange={(event) => {
+                const chosen = event.target.files ? Array.from(event.target.files) : [];
+                event.target.value = '';
+                if (chosen.length === 0) {
+                  setUploadNote({ tone: 'bad', text: 'No photo was added. Choose a JPG, PNG, or WebP.' });
+                  return;
+                }
+                void addFiles(chosen);
+              }}
+            />
+          </div>
+          {uploadNote?.tone === 'ok' && <p role="status" className="text-sm font-semibold text-moss">{uploadNote.text}</p>}
+          {uploadNote?.tone === 'bad' && <div className="w-full max-w-md text-left"><ErrorNote>{uploadNote.text}</ErrorNote></div>}
+          <Hint hint={COUNT_HINT}>
+            {(describedBy) => <p aria-describedby={describedBy} className={`text-xs text-ink/45 ${hintLabel}`}>{readyCount} included · {project.imageCount} uploaded · 50 max</p>}
           </Hint>
-        )}
+          {project.images.length > 0 && (
+            <Hint hint={captionHelpOn === false ? SUGGEST_OFF_HINT : SUGGEST_ALL_HINT}>
+              {(describedBy) => (
+                <button type="button" aria-describedby={describedBy} disabled={suggesting !== null} onClick={() => void suggestUntouched()} className={`rounded-full border border-moss px-4 py-2 text-sm font-semibold text-moss disabled:opacity-50 ${hintLabel}`}>
+                  {suggesting ? 'Writing captions…' : 'Suggest captions with AI'}
+                </button>
+              )}
+            </Hint>
+          )}
+        </div>
       </section>
 
       {error && <div className="mt-4"><ErrorNote>{error}</ErrorNote></div>}
 
       {project.images.length > 0 && (
-        <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        <ul ref={photosRef} className="mt-6 grid scroll-mt-24 grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {project.images.map((image) => (
             <li key={image.id} className="relative rounded-2xl border border-line bg-card hover:z-20">
               <img src={image.url} alt={image.caption || image.filename} className={`aspect-square w-full rounded-t-2xl object-cover ${image.excluded ? 'opacity-40' : ''}`} />
