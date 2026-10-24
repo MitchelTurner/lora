@@ -90,6 +90,14 @@ export function uploadPhotos(id: string, files: File[]): Promise<{ added: number
   return request(`/api/projects/${id}/images`, { method: 'POST', body });
 }
 
+export function captionHelp(): Promise<{ available: boolean }> {
+  return request('/api/caption-help');
+}
+
+export function suggestCaption(projectId: string, imageId: string): Promise<{ caption: string }> {
+  return request(`/api/projects/${projectId}/images/${imageId}/caption`, { method: 'POST' });
+}
+
 export function updatePhoto(projectId: string, imageId: string, patch: { caption?: string; excluded?: boolean }): Promise<DatasetImage> {
   return request(`/api/projects/${projectId}/images/${imageId}`, {
     method: 'PATCH',

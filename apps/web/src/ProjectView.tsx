@@ -1,6 +1,6 @@
 import React from 'react';
-import { deletePhoto, deleteProject, downloadUrl, getProject, submitTraining, updatePhoto, uploadPhotos, type ProjectDetail } from './api';
-import { CAPTION_HINT, CONSENT_HINT, COUNT_HINT, DELETE_HINT, DOWNLOAD_HINT, ErrorNote, Hint, LEAVE_OUT_HINT, MODEL_HINT, MODEL_LABEL, REMOVE_HINT, STATUS_HINT, STATUS_LABEL, TRAIN_HINT, TRIGGER_HINT, TYPE_HINT, TYPE_LABEL, USE_PHOTO_HINT, hintLabel } from './ui';
+import { captionHelp, deletePhoto, deleteProject, downloadUrl, getProject, submitTraining, suggestCaption, updatePhoto, uploadPhotos, type ProjectDetail } from './api';
+import { CAPTION_HINT, CONSENT_HINT, COUNT_HINT, DELETE_HINT, DOWNLOAD_HINT, ErrorNote, Hint, LEAVE_OUT_HINT, MODEL_HINT, MODEL_LABEL, REMOVE_HINT, STATUS_HINT, STATUS_LABEL, SUGGEST_ALL_HINT, SUGGEST_HINT, SUGGEST_OFF_HINT, TRAIN_HINT, TRIGGER_HINT, TYPE_HINT, TYPE_LABEL, USE_PHOTO_HINT, hintLabel } from './ui';
 
 const MIN_PHOTOS = 5;
 
@@ -11,10 +11,63 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   const [submitting, setSubmitting] = React.useState(false);
   const [consent, setConsent] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false);
+  const [captionHelpOn, setCaptionHelpOn] = React.useState<boolean | null>(null);
+  const [suggesting, setSuggesting] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   async function reload() {
     setProject(await getProject(id));
+  }
+
+  React.useEffect(() => {
+    let active = true;
+    captionHelp()
+      .then((result) => { if (active) setCaptionHelpOn(result.available); })
+      .catch(() => { if (active) setCaptionHelpOn(false); });
+    return () => { active = false; };
+  }, []);
+
+  function applyCaption(imageId: string, caption: string) {
+    setProject((current) => current ? {
+      ...current,
+      images: current.images.map((item) => item.id === imageId ? { ...item, caption } : item),
+    } : current);
+  }
+
+  async function suggestOne(imageId: string) {
+    setSuggesting(imageId);
+    setError('');
+    try {
+      const result = await suggestCaption(id, imageId);
+      applyCaption(imageId, result.caption);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Could not write a caption.');
+    } finally {
+      setSuggesting(null);
+    }
+  }
+
+  async function suggestUntouched() {
+    const current = project;
+    if (!current) return;
+    const targets = current.images.filter((image) => !image.excluded && (image.caption.trim() === '' || image.caption.trim() === current.triggerWord));
+    if (targets.length === 0) {
+      setError('Every included photo already has its own caption. Use Suggest with AI on a photo to rewrite one.');
+      return;
+    }
+    setError('');
+    for (const image of targets) {
+      setSuggesting(image.id);
+      try {
+        const result = await suggestCaption(id, image.id);
+        applyCaption(image.id, result.caption);
+      } catch (reason: unknown) {
+        setSuggesting(null);
+        setError(reason instanceof Error ? reason.message : 'Could not write a caption.');
+        return;
+      }
+    }
+    setSuggesting(null);
   }
 
   React.useEffect(() => {
@@ -111,6 +164,15 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
         <Hint inline hint={COUNT_HINT} className="mt-3">
           {(describedBy) => <p aria-describedby={describedBy} className={`text-xs text-ink/45 ${hintLabel}`}>{readyCount} included · {project.imageCount} uploaded · 50 max</p>}
         </Hint>
+        {project.images.length > 0 && (
+          <Hint hint={captionHelpOn === false ? SUGGEST_OFF_HINT : SUGGEST_ALL_HINT} className="mt-4 inline-block">
+            {(describedBy) => (
+              <button type="button" aria-describedby={describedBy} disabled={suggesting !== null} onClick={() => void suggestUntouched()} className={`rounded-full border border-moss px-4 py-2 text-sm font-semibold text-moss disabled:opacity-50 ${hintLabel}`}>
+                {suggesting ? 'Writing captions…' : 'Suggest captions with AI'}
+              </button>
+            )}
+          </Hint>
+        )}
       </section>
 
       {error && <div className="mt-4"><ErrorNote>{error}</ErrorNote></div>}
@@ -125,11 +187,18 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
                   {(describedBy) => (
                     <label className="block text-xs font-semibold text-ink/50">
                       <span className={hintLabel}>Caption</span>
-                      <input aria-describedby={describedBy} value={image.caption} onChange={(event) => {
+                      <textarea aria-describedby={describedBy} rows={3} value={image.caption} onChange={(event) => {
                         const caption = event.target.value;
                         setProject((current) => current ? { ...current, images: current.images.map((item) => item.id === image.id ? { ...item, caption } : item) } : current);
-                      }} onBlur={(event) => { void updatePhoto(id, image.id, { caption: event.target.value }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not save that caption.')); }} className="mt-1 w-full rounded-lg border border-line bg-paper px-2 py-1.5 text-sm font-normal text-ink" />
+                      }} onBlur={(event) => { void updatePhoto(id, image.id, { caption: event.target.value }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not save that caption.')); }} className="mt-1 w-full resize-none rounded-lg border border-line bg-paper px-2 py-1.5 text-sm font-normal leading-snug text-ink" />
                     </label>
+                  )}
+                </Hint>
+                <Hint hint={captionHelpOn === false ? SUGGEST_OFF_HINT : SUGGEST_HINT}>
+                  {(describedBy) => (
+                    <button type="button" aria-describedby={describedBy} disabled={suggesting !== null} onClick={() => void suggestOne(image.id)} className={`text-xs font-semibold text-moss disabled:opacity-50 ${hintLabel}`}>
+                      {suggesting === image.id ? 'Writing…' : 'Suggest with AI'}
+                    </button>
                   )}
                 </Hint>
                 <div className="flex justify-between text-xs font-semibold">

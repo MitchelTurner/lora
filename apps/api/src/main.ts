@@ -2,6 +2,7 @@ import Busboy from 'busboy';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
+import { CaptionError, captionHelpAvailable, suggestCaption } from './captions';
 import {
   BASE_MODELS,
   LORA_TYPES,
@@ -232,6 +233,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
 
+  if (req.method === 'GET' && path === '/api/caption-help') {
+    sendJson(res, 200, { available: captionHelpAvailable() });
+    return;
+  }
+
   if (req.method === 'POST' && path === '/api/projects') {
     const body = await readJson(req);
     const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -273,6 +279,26 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       'access-control-allow-origin': '*',
     });
     res.end(readFileSync(filePath));
+    return;
+  }
+
+  const captionMatch = path.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/caption$/);
+  if (captionMatch && req.method === 'POST') {
+    const project = getProject(captionMatch[1] ?? '');
+    const image = project?.images.find((item) => item.id === captionMatch[2]);
+    if (!project || !image) {
+      sendError(res, 404, 'That photo could not be found.');
+      return;
+    }
+    try {
+      const caption = await suggestCaption(project, image);
+      await updateImage(project.id, image.id, { caption });
+      sendJson(res, 200, { caption });
+    } catch (error) {
+      const status = error instanceof CaptionError ? error.status : 502;
+      const message = error instanceof Error ? error.message : 'The caption could not be written.';
+      sendError(res, status, message);
+    }
     return;
   }
 
