@@ -11,13 +11,33 @@ from pathlib import Path
 DEFAULT_API = 'https://lora-forgeapi-production.up.railway.app'
 
 
+def argument(args: list[str], name: str) -> str:
+    flag = f'--{name}'
+    prefix = f'--{name}='
+    for index, arg in enumerate(args):
+        if arg == flag and index + 1 < len(args) and not args[index + 1].startswith('--'):
+            return args[index + 1].strip()
+        if arg.startswith(prefix):
+            return arg[len(prefix):].strip()
+    return ''
+
+
+def worker_settings(argv: list[str] | None = None) -> tuple[str, str, bool]:
+    args = list(sys.argv[1:] if argv is None else argv)
+    token = argument(args, 'token') or os.environ.get('WORKER_TOKEN', '')
+    base = argument(args, 'api') or os.environ.get('API_BASE', '') or DEFAULT_API
+    return token.strip(), base.strip().rstrip('/'), '--once' in args
+
+
 def main() -> None:
-    token = os.environ.get('WORKER_TOKEN', '').strip()
+    token, base, once = worker_settings()
     if not token:
-        raise SystemExit('Set WORKER_TOKEN to the same value as on the LoRA Forge API service.')
+        raise SystemExit(
+            'Start it with: py -m trainer --token YOUR_TOKEN --api https://your-lora-forge-site\n'
+            'Use the same token you set as WORKER_TOKEN on the API service. '
+            'Run this from the lora\\workers\\trainer folder.'
+        )
     ensure_gpu()
-    base = os.environ.get('API_BASE', DEFAULT_API).rstrip('/')
-    once = '--once' in sys.argv
     print(f'GPU worker watching {base}', flush=True)
     while True:
         claimed = run_once(base, token)
