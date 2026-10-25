@@ -62,6 +62,8 @@ export interface ProjectDetail extends ProjectSummary {
   artifacts: LoraFile[];
 }
 
+export const MISSING_LORA = 'This LoRA is no longer on the server for the recovery code in this browser. Start it again from your list. To keep photos when the site updates, mount a volume at /data on the API service and set DATA_DIR to /data.';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set('x-lora-key', ownerKey());
@@ -69,7 +71,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers });
   const text = await response.text();
   const body = text ? JSON.parse(text) as { error?: string } : {};
-  if (!response.ok) throw new Error(body.error || 'Something went wrong. Please try again.');
+  if (!response.ok) {
+    const message = body.error || 'Something went wrong. Please try again.';
+    throw new Error(message === 'That LoRA could not be found.' ? MISSING_LORA : message);
+  }
   return body as T;
 }
 

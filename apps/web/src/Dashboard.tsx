@@ -6,12 +6,29 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
   const [projects, setProjects] = React.useState<ProjectSummary[] | null>(null);
   const [error, setError] = React.useState('');
 
+  const loaded = React.useRef(false);
+
   React.useEffect(() => {
     let active = true;
-    listProjects()
-      .then((result) => { if (active) setProjects(result.projects); })
-      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load your LoRAs.'); });
-    return () => { active = false; };
+    function load() {
+      listProjects()
+        .then((result) => {
+          if (!active) return;
+          loaded.current = true;
+          setError('');
+          setProjects(result.projects);
+        })
+        .catch((reason: unknown) => {
+          if (!active || loaded.current) return;
+          setError(reason instanceof Error ? reason.message : 'Could not load your LoRAs.');
+        });
+    }
+    load();
+    window.addEventListener('focus', load);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', load);
+    };
   }, []);
 
   if (error) return <ErrorNote>{error}</ErrorNote>;

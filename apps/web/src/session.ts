@@ -1,16 +1,44 @@
 const STORAGE_KEY = 'lora-forge-key';
 
+let memoryKey = '';
+
 export function isOwnerKey(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
+function readStorage(): string {
+  try {
+    return localStorage.getItem(STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function readCookie(): string {
+  const match = /(?:^|;\s*)lora_key=([^;]+)/.exec(document.cookie);
+  if (!match?.[1]) return '';
+  try {
+    return decodeURIComponent(match[1]).trim();
+  } catch {
+    return '';
+  }
+}
+
 function remember(key: string): void {
-  localStorage.setItem(STORAGE_KEY, key);
+  memoryKey = key;
+  try {
+    localStorage.setItem(STORAGE_KEY, key);
+  } catch {
+    // Private browsing can block storage. This tab and the cookie still hold the code.
+  }
   document.cookie = `lora_key=${encodeURIComponent(key)}; Path=/; SameSite=Lax; Max-Age=31536000`;
 }
 
 export function ownerKey(): string {
-  const existing = localStorage.getItem(STORAGE_KEY) ?? '';
+  if (isOwnerKey(memoryKey)) return memoryKey;
+  const stored = readStorage();
+  const fromCookie = readCookie();
+  const existing = isOwnerKey(stored) ? stored : fromCookie;
   const key = isOwnerKey(existing) ? existing.trim().toLowerCase() : crypto.randomUUID();
   remember(key);
   return key;

@@ -68,10 +68,10 @@ const MIN_IMAGES_TO_TRAIN = 5;
 const MAX_IMAGES = 50;
 
 export function dataDir(): string {
-  const configured = process.env.DATA_DIR?.trim();
-  if (configured) return configured;
   const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
   if (volume) return volume;
+  const configured = process.env.DATA_DIR?.trim();
+  if (configured) return configured;
   return join(process.cwd(), 'data');
 }
 

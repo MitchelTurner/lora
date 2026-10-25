@@ -1,5 +1,5 @@
 import React from 'react';
-import { captionHelp, deletePhoto, deleteProject, downloadUrl, getProject, submitTraining, suggestCaption, updatePhoto, updateProject, uploadPhotos, type BaseModel, type LoraType, type ProjectDetail } from './api';
+import { captionHelp, deletePhoto, deleteProject, downloadUrl, getProject, MISSING_LORA, submitTraining, suggestCaption, updatePhoto, updateProject, uploadPhotos, type BaseModel, type LoraType, type ProjectDetail } from './api';
 import { preparePhotos } from './photos';
 import { inspectPhoto, nearDuplicate } from './quality';
 import { CAPTION_HINT, CONSENT_HINT, COUNT_HINT, DELETE_HINT, DOWNLOAD_HINT, EDIT_HINT, ErrorNote, Hint, LEAVE_OUT_HINT, MODEL_HINT, MODEL_LABEL, REMOVE_HINT, REVIEW_HINT, SHOT_HINT, STATUS_HINT, STATUS_LABEL, SUGGEST_ALL_HINT, SUGGEST_HINT, SUGGEST_OFF_HINT, TRAIN_HINT, TRIGGER_HINT, TYPE_HINT, TYPE_LABEL, USE_PHOTO_HINT, hintLabel } from './ui';
@@ -97,7 +97,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   React.useEffect(() => {
     let active = true;
     getProject(id)
-      .then((result) => { if (active) setProject(result); })
+      .then((result) => { if (active) { setError(''); setProject(result); } })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Could not open this LoRA.'); });
     return () => { active = false; };
   }, [id]);
@@ -105,10 +105,30 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   React.useEffect(() => {
     if (project?.status !== 'TRAINING') return;
     const timer = window.setInterval(() => {
-      void getProject(id).then(setProject).catch(() => undefined);
+      void getProject(id).then(setProject).catch((reason: unknown) => {
+        const message = reason instanceof Error ? reason.message : '';
+        if (message === MISSING_LORA) {
+          setProject(null);
+          setError(message);
+        }
+      });
     }, 15000);
     return () => window.clearInterval(timer);
   }, [id, project?.status]);
+
+  React.useEffect(() => {
+    function onFocus() {
+      void getProject(id).catch((reason: unknown) => {
+        const message = reason instanceof Error ? reason.message : '';
+        if (message === MISSING_LORA) {
+          setProject(null);
+          setError(message);
+        }
+      });
+    }
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [id]);
 
   React.useEffect(() => {
     const saved = localStorage.getItem(`lora-forge-shots:${id}`);
@@ -232,7 +252,14 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
       setUploadNote({ tone: 'ok', text });
       scrollPhotos.current = true;
     } catch (reason: unknown) {
-      setUploadNote({ tone: 'bad', text: reason instanceof Error ? reason.message : 'Upload failed.' });
+      const message = reason instanceof Error ? reason.message : 'Upload failed.';
+      if (message === MISSING_LORA) {
+        setProject(null);
+        setError(message);
+        setUploadNote(null);
+        return;
+      }
+      setUploadNote({ tone: 'bad', text: message });
     } finally {
       setUploading(false);
     }
@@ -273,7 +300,15 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
     }
   }
 
-  if (error && !project) return <div><button type="button" onClick={onBack} className="text-sm font-semibold text-moss">← All LoRAs</button><div className="mt-4"><ErrorNote>{error}</ErrorNote></div></div>;
+  if (error && !project) {
+    return (
+      <div>
+        <button type="button" onClick={onBack} className="text-sm font-semibold text-moss">← All LoRAs</button>
+        {error === MISSING_LORA && <h1 className="mt-4 font-serif text-4xl tracking-tight">This LoRA is not on the server</h1>}
+        <div className="mt-4 max-w-xl"><ErrorNote>{error}</ErrorNote></div>
+      </div>
+    );
+  }
   if (!project) return <p className="text-ink/60">Loading this LoRA…</p>;
 
   const queued = project.latestJob && ['queued', 'preprocessing', 'training'].includes(project.latestJob.status);
