@@ -15,9 +15,11 @@ import {
   getProject,
   includedImages,
   listProjects,
+  ownerIdFromKey,
   saveImage,
   submitTraining,
   updateImage,
+  updateProject,
   type BaseModel,
   type LoraType,
   type TrainingProject,
@@ -144,6 +146,34 @@ function readUploads(req: IncomingMessage): Promise<{ filename: string; buffer: 
   });
 }
 
+function isOwnerKey(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function readOwnerKey(req: IncomingMessage): string | undefined {
+  const header = req.headers['x-lora-key'];
+  const fromHeader = Array.isArray(header) ? header[0] : header;
+  if (typeof fromHeader === 'string' && isOwnerKey(fromHeader.trim())) return fromHeader.trim().toLowerCase();
+  const cookie = req.headers.cookie ?? '';
+  const match = /(?:^|;\s*)lora_key=([^;]+)/.exec(cookie);
+  if (!match?.[1]) return undefined;
+  try {
+    const value = decodeURIComponent(match[1]).trim().toLowerCase();
+    return isOwnerKey(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function requireOwner(req: IncomingMessage, res: ServerResponse): string | undefined {
+  const key = readOwnerKey(req);
+  if (!key) {
+    sendError(res, 401, 'Your photos stay private to a recovery code. Open LoRA Forge and copy the code from the header.');
+    return undefined;
+  }
+  return ownerIdFromKey(key);
+}
+
 function projectSummary(project: TrainingProject) {
   const included = includedImages(project);
   return {
@@ -162,7 +192,12 @@ function projectSummary(project: TrainingProject) {
       url: `/api/projects/${project.id}/images/${image.id}/file`,
     })),
     latestJob: project.jobs[0] ?? null,
-    artifacts: project.artifacts,
+    artifacts: project.artifacts.map((artifact) => ({
+      id: artifact.id,
+      type: artifact.type,
+      filename: artifact.filename,
+      sizeBytes: artifact.sizeBytes,
+    })),
   };
 }
 
@@ -174,6 +209,15 @@ function projectDetail(project: TrainingProject) {
       url: `/api/projects/${project.id}/images/${image.id}/file`,
     })),
     jobs: project.jobs,
+    artifacts: project.artifacts.map((artifact) => ({
+      id: artifact.id,
+      jobId: artifact.jobId,
+      type: artifact.type,
+      filename: artifact.filename,
+      sizeBytes: artifact.sizeBytes,
+      createdAt: artifact.createdAt,
+      url: `/api/projects/${project.id}/artifacts/${artifact.id}`,
+    })),
   };
 }
 
@@ -222,7 +266,7 @@ async function sendZip(res: ServerResponse, project: TrainingProject): Promise<v
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   res.setHeader('access-control-allow-origin', '*');
   res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type');
+  res.setHeader('access-control-allow-headers', 'content-type, x-lora-key');
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
@@ -236,7 +280,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   if (req.method === 'GET' && path === '/api/projects') {
-    sendJson(res, 200, { projects: listProjects().map(projectSummary) });
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    sendJson(res, 200, { projects: listProjects(ownerId).map(projectSummary) });
     return;
   }
 
@@ -261,14 +307,18 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       sendError(res, 400, 'Choose what you are training and which base model to use.');
       return;
     }
-    const project = await createProject({ name, triggerWord, baseModel: body.baseModel, loraType: body.loraType });
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = await createProject({ ownerId, name, triggerWord, baseModel: body.baseModel, loraType: body.loraType });
     sendJson(res, 201, projectDetail(project));
     return;
   }
 
   const fileMatch = path.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/file$/);
   if (req.method === 'GET' && fileMatch) {
-    const project = getProject(fileMatch[1] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = getProject(fileMatch[1] ?? '', ownerId);
     const image = project?.images.find((item) => item.id === fileMatch[2]);
     if (!project || !image) {
       sendError(res, 404, 'That photo could not be found.');
@@ -291,7 +341,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   const captionMatch = path.match(/^\/api\/projects\/([^/]+)\/images\/([^/]+)\/caption$/);
   if (captionMatch && req.method === 'POST') {
-    const project = getProject(captionMatch[1] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = getProject(captionMatch[1] ?? '', ownerId);
     const image = project?.images.find((item) => item.id === captionMatch[2]);
     if (!project || !image) {
       sendError(res, 404, 'That photo could not be found.');
@@ -299,7 +351,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
     try {
       const caption = await suggestCaption(project, image);
-      await updateImage(project.id, image.id, { caption });
+      await updateImage(project.id, ownerId, image.id, { caption });
       sendJson(res, 200, { caption });
     } catch (error) {
       const status = error instanceof CaptionError ? error.status : 502;
@@ -327,20 +379,26 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       }
       patch.excluded = body.excluded;
     }
-    const image = await updateImage(imageMatch[1] ?? '', imageMatch[2] ?? '', patch);
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const image = await updateImage(imageMatch[1] ?? '', ownerId, imageMatch[2] ?? '', patch);
     sendJson(res, 200, image);
     return;
   }
 
   if (imageMatch && req.method === 'DELETE') {
-    await deleteImage(imageMatch[1] ?? '', imageMatch[2] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    await deleteImage(imageMatch[1] ?? '', ownerId, imageMatch[2] ?? '');
     sendJson(res, 200, { ok: true });
     return;
   }
 
   const imagesMatch = path.match(/^\/api\/projects\/([^/]+)\/images$/);
   if (imagesMatch && req.method === 'POST') {
-    const project = getProject(imagesMatch[1] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = getProject(imagesMatch[1] ?? '', ownerId);
     if (!project) {
       sendError(res, 404, 'That LoRA could not be found.');
       return;
@@ -358,7 +416,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         if (isHeic(upload.buffer)) sawHeic = true;
         continue;
       }
-      saved.push(await saveImage(project.id, {
+      saved.push(await saveImage(project.id, ownerId, {
         filename: upload.filename,
         mime: sniffed.mime,
         buffer: upload.buffer,
@@ -372,7 +430,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         : 'None of those files were JPG, PNG, or WebP photos.');
       return;
     }
-    const updated = getProject(project.id);
+    const updated = getProject(project.id, ownerId);
     sendJson(res, 201, { added: saved.length, project: updated ? projectDetail(updated) : null, maxImages: MAX_IMAGES });
     return;
   }
@@ -387,14 +445,18 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const statement = typeof body.consentStatement === 'string' && body.consentStatement.trim()
       ? body.consentStatement.trim()
       : 'I have the rights to train a model on these photos.';
-    const project = await submitTraining(trainMatch[1] ?? '', statement);
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = await submitTraining(trainMatch[1] ?? '', ownerId, statement);
     sendJson(res, 201, projectDetail(project));
     return;
   }
 
   const downloadMatch = path.match(/^\/api\/projects\/([^/]+)\/download$/);
   if (downloadMatch && req.method === 'GET') {
-    const project = getProject(downloadMatch[1] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = getProject(downloadMatch[1] ?? '', ownerId);
     if (!project) {
       sendError(res, 404, 'That LoRA could not be found.');
       return;
@@ -403,9 +465,74 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
 
+  const artifactMatch = path.match(/^\/api\/projects\/([^/]+)\/artifacts\/([^/]+)$/);
+  if (artifactMatch && req.method === 'GET') {
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = getProject(artifactMatch[1] ?? '', ownerId);
+    const artifact = project?.artifacts.find((item) => item.id === artifactMatch[2]);
+    if (!project || !artifact) {
+      sendError(res, 404, 'That file could not be found.');
+      return;
+    }
+    const filePath = absolutePath(artifact.storageKey);
+    if (!existsSync(filePath)) {
+      sendError(res, 404, 'That LoRA file is not ready yet.');
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': statSync(filePath).size,
+      'content-disposition': `attachment; filename="${artifact.filename.replace(/"/g, '')}"`,
+      'access-control-allow-origin': '*',
+    });
+    res.end(readFileSync(filePath));
+    return;
+  }
+
   const oneMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+  if (oneMatch && req.method === 'PATCH') {
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const body = await readJson(req);
+    const patch: { name?: string; triggerWord?: string; baseModel?: BaseModel; loraType?: LoraType } = {};
+    if (body.name !== undefined) {
+      if (typeof body.name !== 'string' || body.name.trim().length < 2) {
+        sendError(res, 400, 'Give this LoRA a name.');
+        return;
+      }
+      patch.name = body.name;
+    }
+    if (body.triggerWord !== undefined) {
+      if (typeof body.triggerWord !== 'string' || !/^[a-zA-Z][a-zA-Z0-9]{1,31}$/.test(body.triggerWord.trim())) {
+        sendError(res, 400, 'Use a trigger word of 2–32 letters and numbers, starting with a letter.');
+        return;
+      }
+      patch.triggerWord = body.triggerWord.trim();
+    }
+    if (body.baseModel !== undefined) {
+      if (!isBaseModel(body.baseModel)) {
+        sendError(res, 400, 'Choose which base model to use.');
+        return;
+      }
+      patch.baseModel = body.baseModel;
+    }
+    if (body.loraType !== undefined) {
+      if (!isLoraType(body.loraType)) {
+        sendError(res, 400, 'Choose what you are training.');
+        return;
+      }
+      patch.loraType = body.loraType;
+    }
+    const project = await updateProject(oneMatch[1] ?? '', ownerId, patch);
+    sendJson(res, 200, projectDetail(project));
+    return;
+  }
+
   if (oneMatch && req.method === 'GET') {
-    const project = getProject(oneMatch[1] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    const project = getProject(oneMatch[1] ?? '', ownerId);
     if (!project) {
       sendError(res, 404, 'That LoRA could not be found.');
       return;
@@ -415,7 +542,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   if (oneMatch && req.method === 'DELETE') {
-    await deleteProject(oneMatch[1] ?? '');
+    const ownerId = requireOwner(req, res);
+    if (!ownerId) return;
+    await deleteProject(oneMatch[1] ?? '', ownerId);
     sendJson(res, 200, { ok: true });
     return;
   }

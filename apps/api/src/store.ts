@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -47,6 +47,7 @@ export interface TrainingArtifact {
 
 export interface TrainingProject {
   id: string;
+  ownerId: string;
   name: string;
   baseModel: BaseModel;
   loraType: LoraType;
@@ -105,12 +106,16 @@ function update<T>(change: (db: Database) => T): Promise<T> {
   return run;
 }
 
-export function listProjects(): TrainingProject[] {
-  return readDb().projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+export function ownerIdFromKey(key: string): string {
+  return createHash('sha256').update(key.trim().toLowerCase()).digest('hex');
 }
 
-export function getProject(id: string): TrainingProject | undefined {
-  return readDb().projects.find((project) => project.id === id);
+export function listProjects(ownerId: string): TrainingProject[] {
+  return readDb().projects.filter((project) => project.ownerId === ownerId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export function getProject(id: string, ownerId: string): TrainingProject | undefined {
+  return readDb().projects.find((project) => project.id === id && project.ownerId === ownerId);
 }
 
 export function includedImages(project: TrainingProject): DatasetImage[] {
@@ -118,6 +123,7 @@ export function includedImages(project: TrainingProject): DatasetImage[] {
 }
 
 export function createProject(input: {
+  ownerId: string;
   name: string;
   baseModel: BaseModel;
   loraType: LoraType;
@@ -126,6 +132,7 @@ export function createProject(input: {
   const now = new Date().toISOString();
   const project: TrainingProject = {
     id: randomUUID(),
+    ownerId: input.ownerId,
     name: input.name.trim(),
     baseModel: input.baseModel,
     loraType: input.loraType,
@@ -145,10 +152,11 @@ export function createProject(input: {
 
 export function saveImage(
   projectId: string,
+  ownerId: string,
   file: { filename: string; mime: string; buffer: Buffer; width: number; height: number },
 ): Promise<DatasetImage> {
   return update((db) => {
-    const project = db.projects.find((item) => item.id === projectId);
+    const project = db.projects.find((item) => item.id === projectId && item.ownerId === ownerId);
     if (!project) throw new Error('That LoRA could not be found.');
     if (project.images.length >= MAX_IMAGES) {
       throw new Error(`A LoRA can hold up to ${MAX_IMAGES} photos.`);
@@ -178,13 +186,48 @@ export function saveImage(
   });
 }
 
+function retargetCaption(caption: string, previous: string, next: string): string {
+  const trimmed = caption.trim();
+  if (trimmed.toLowerCase() === previous.toLowerCase()) return next;
+  const prefix = `${previous},`;
+  if (trimmed.toLowerCase().startsWith(prefix.toLowerCase())) return `${next}${trimmed.slice(previous.length)}`;
+  return caption;
+}
+
+export function updateProject(
+  projectId: string,
+  ownerId: string,
+  patch: { name?: string; triggerWord?: string; baseModel?: BaseModel; loraType?: LoraType },
+): Promise<TrainingProject> {
+  return update((db) => {
+    const project = db.projects.find((item) => item.id === projectId && item.ownerId === ownerId);
+    if (!project) throw new Error('That LoRA could not be found.');
+    const locked = project.status === 'TRAINING' || project.status === 'COMPLETED';
+    const changesSetup = patch.triggerWord !== undefined || patch.baseModel !== undefined || patch.loraType !== undefined;
+    if (locked && changesSetup) {
+      throw new Error('While training is queued or finished, you can change the name. The trigger word, subject, and base model stay as submitted.');
+    }
+    if (patch.name !== undefined) project.name = patch.name.trim();
+    if (patch.baseModel !== undefined) project.baseModel = patch.baseModel;
+    if (patch.loraType !== undefined) project.loraType = patch.loraType;
+    if (patch.triggerWord !== undefined && patch.triggerWord !== project.triggerWord) {
+      const previous = project.triggerWord;
+      project.triggerWord = patch.triggerWord;
+      for (const image of project.images) image.caption = retargetCaption(image.caption, previous, patch.triggerWord);
+    }
+    project.updatedAt = new Date().toISOString();
+    return project;
+  });
+}
+
 export function updateImage(
   projectId: string,
+  ownerId: string,
   imageId: string,
   patch: { caption?: string; excluded?: boolean },
 ): Promise<DatasetImage> {
   return update((db) => {
-    const project = db.projects.find((item) => item.id === projectId);
+    const project = db.projects.find((item) => item.id === projectId && item.ownerId === ownerId);
     const image = project?.images.find((item) => item.id === imageId);
     if (!project || !image) throw new Error('That photo could not be found.');
     if (patch.caption !== undefined) image.caption = patch.caption.trim();
@@ -195,9 +238,9 @@ export function updateImage(
   });
 }
 
-export function deleteImage(projectId: string, imageId: string): Promise<void> {
+export function deleteImage(projectId: string, ownerId: string, imageId: string): Promise<void> {
   return update((db) => {
-    const project = db.projects.find((item) => item.id === projectId);
+    const project = db.projects.find((item) => item.id === projectId && item.ownerId === ownerId);
     if (!project) throw new Error('That LoRA could not be found.');
     const image = project.images.find((item) => item.id === imageId);
     if (!image) throw new Error('That photo could not be found.');
@@ -209,9 +252,9 @@ export function deleteImage(projectId: string, imageId: string): Promise<void> {
   });
 }
 
-export function deleteProject(id: string): Promise<void> {
+export function deleteProject(id: string, ownerId: string): Promise<void> {
   return update((db) => {
-    const project = db.projects.find((item) => item.id === id);
+    const project = db.projects.find((item) => item.id === id && item.ownerId === ownerId);
     if (!project) throw new Error('That LoRA could not be found.');
     db.projects = db.projects.filter((item) => item.id !== id);
     const folder = join(dataDir(), 'uploads', id);
@@ -219,9 +262,9 @@ export function deleteProject(id: string): Promise<void> {
   });
 }
 
-export function submitTraining(projectId: string, consentStatement: string): Promise<TrainingProject> {
+export function submitTraining(projectId: string, ownerId: string, consentStatement: string): Promise<TrainingProject> {
   return update((db) => {
-    const project = db.projects.find((item) => item.id === projectId);
+    const project = db.projects.find((item) => item.id === projectId && item.ownerId === ownerId);
     if (!project) throw new Error('That LoRA could not be found.');
     const ready = includedImages(project);
     if (ready.length < MIN_IMAGES_TO_TRAIN) {

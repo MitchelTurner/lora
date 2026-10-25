@@ -27,6 +27,9 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
             <p className="mt-5 max-w-lg text-lg leading-relaxed text-ink/70">
               Teach a model a person, a style, or an object. Add the photos that define it, then download the set when you are ready to train.
             </p>
+            <p className="mt-3 max-w-lg text-sm leading-relaxed text-ink/55">
+              Your LoRAs stay private to the recovery code in the header. Copy that code if you want them on another device.
+            </p>
             <button type="button" onClick={onCreate} className="mt-8 rounded-full bg-moss px-6 py-3 text-base font-semibold text-white hover:bg-mossdark">
               Start a LoRA
             </button>

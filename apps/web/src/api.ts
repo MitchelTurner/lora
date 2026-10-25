@@ -1,3 +1,5 @@
+import { ownerKey } from './session';
+
 export type BaseModel = 'SDXL' | 'FLUX1_DEV';
 export type LoraType = 'CHARACTER' | 'STYLE' | 'OBJECT';
 export type ProjectStatus = 'DRAFT' | 'READY' | 'TRAINING' | 'COMPLETED' | 'FAILED';
@@ -46,13 +48,25 @@ export interface ProjectSummary {
   latestJob: TrainingJob | null;
 }
 
+export interface LoraFile {
+  id: string;
+  type: 'lora' | 'dataset_zip';
+  filename: string;
+  sizeBytes: number;
+  url?: string;
+}
+
 export interface ProjectDetail extends ProjectSummary {
   images: DatasetImage[];
   jobs: TrainingJob[];
+  artifacts: LoraFile[];
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const headers = new Headers(init?.headers);
+  headers.set('x-lora-key', ownerKey());
+  if (init?.body instanceof FormData) headers.delete('content-type');
+  const response = await fetch(path, { ...init, headers });
   const text = await response.text();
   const body = text ? JSON.parse(text) as { error?: string } : {};
   if (!response.ok) throw new Error(body.error || 'Something went wrong. Please try again.');
@@ -78,6 +92,19 @@ export function createProject(input: {
 
 export function getProject(id: string): Promise<ProjectDetail> {
   return request(`/api/projects/${id}`);
+}
+
+export function updateProject(id: string, patch: {
+  name?: string;
+  baseModel?: BaseModel;
+  loraType?: LoraType;
+  triggerWord?: string;
+}): Promise<ProjectDetail> {
+  return request(`/api/projects/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
 }
 
 export function deleteProject(id: string): Promise<void> {

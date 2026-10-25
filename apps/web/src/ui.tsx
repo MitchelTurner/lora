@@ -1,4 +1,5 @@
 import React from 'react';
+import { adoptOwnerKey, isOwnerKey, ownerKey } from './session';
 
 export function Shell({
   children,
@@ -9,6 +10,27 @@ export function Shell({
   onHome: () => void;
   onCreate?: () => void;
 }) {
+  const [recoveryOpen, setRecoveryOpen] = React.useState(false);
+  const [code, setCode] = React.useState(ownerKey);
+  const [draft, setDraft] = React.useState('');
+  const [copied, setCopied] = React.useState(false);
+  const [recoveryError, setRecoveryError] = React.useState('');
+
+  async function copyCode() {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+  }
+
+  function useCode(event: React.FormEvent) {
+    event.preventDefault();
+    if (!isOwnerKey(draft)) {
+      setRecoveryError('A recovery code is four groups of letters and numbers, like 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d.');
+      return;
+    }
+    adoptOwnerKey(draft);
+    window.location.assign('/');
+  }
+
   return (
     <div className="min-h-screen bg-paper font-sans text-ink">
       <header className="sticky top-0 z-20 border-b border-line bg-paper/90 backdrop-blur">
@@ -22,12 +44,38 @@ export function Shell({
             </span>
             <span className="font-serif text-2xl leading-none tracking-tight">LoRA Forge</span>
           </button>
-          {onCreate && (
-            <button type="button" onClick={onCreate} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper hover:bg-ink/90">
-              New LoRA
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => { setRecoveryOpen((open) => !open); setCode(ownerKey()); setCopied(false); setRecoveryError(''); }} className="rounded-full px-3 py-2 text-sm font-semibold text-ink/70 hover:text-ink">
+              Recovery code
             </button>
-          )}
+            {onCreate && (
+              <button type="button" onClick={onCreate} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper hover:bg-ink/90">
+                New LoRA
+              </button>
+            )}
+          </div>
         </div>
+        {recoveryOpen && (
+          <div className="border-t border-line bg-card">
+            <div className="mx-auto grid max-w-5xl gap-4 px-5 py-4 md:grid-cols-2">
+              <div>
+                <p className="text-sm font-semibold">This browser’s code</p>
+                <p className="mt-1 text-sm text-ink/70">Your LoRAs and photos stay tied to this code. Copy it before you switch devices.</p>
+                <p className="mt-3 break-all rounded-2xl bg-paper px-3 py-2 font-mono text-sm">{code}</p>
+                <button type="button" onClick={() => void copyCode().catch(() => setRecoveryError('Could not copy. Select the code and copy it yourself.'))} className="mt-3 text-sm font-semibold text-moss">
+                  {copied ? 'Copied' : 'Copy code'}
+                </button>
+              </div>
+              <form onSubmit={useCode}>
+                <p className="text-sm font-semibold">Open LoRAs from another code</p>
+                <p className="mt-1 text-sm text-ink/70">Paste a recovery code to see the LoRAs saved with it on this browser.</p>
+                <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Paste a recovery code" className="mt-3 w-full rounded-2xl border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-moss" />
+                {recoveryError && <p className="mt-2 text-sm text-red-800" role="alert">{recoveryError}</p>}
+                <button type="submit" className="mt-3 rounded-full bg-moss px-4 py-2 text-sm font-semibold text-white">Use this code</button>
+              </form>
+            </div>
+          </div>
+        )}
       </header>
       <main className="mx-auto max-w-5xl px-5 py-8">{children}</main>
     </div>
@@ -107,7 +155,7 @@ export const hintLabel = 'underline decoration-dotted decoration-ink/30 underlin
 export const STATUS_LABEL: Record<string, string> = {
   DRAFT: 'Add photos',
   READY: 'Ready to train',
-  TRAINING: 'Training queued',
+  TRAINING: 'Waiting for a GPU',
   COMPLETED: 'Ready to download',
   FAILED: 'Needs a look',
 };
@@ -126,7 +174,7 @@ export const MODEL_LABEL: Record<string, string> = {
 export const STATUS_HINT: Record<string, string> = {
   DRAFT: 'This LoRA still needs photos. Add at least 5 included photos before you can submit training.',
   READY: 'At least 5 photos are included. You can submit training whenever you are ready.',
-  TRAINING: 'Training is waiting for a GPU worker. Your photos stay here, and the LoRA file appears when the run finishes.',
+  TRAINING: 'Training has not started. A GPU worker has to pick up the job. Your photos stay here, and the .safetensors file appears when a real run finishes.',
   COMPLETED: 'Training finished. Open this LoRA to download the model file.',
   FAILED: 'Training did not finish. Open this LoRA to see what needs another try.',
 };
@@ -151,7 +199,10 @@ export const SUGGEST_ALL_HINT = 'Writes a caption for every included photo that 
 export const LEAVE_OUT_HINT = 'Keeps this photo in the project but skips it for training and for the download.';
 export const USE_PHOTO_HINT = 'Puts this photo back into training and into the download.';
 export const REMOVE_HINT = 'Deletes this photo from the project. This does not affect the other photos.';
-export const DOWNLOAD_HINT = 'Saves a zip of the included photos, their captions, and a small lora.json file. The trained .safetensors file is added here only after training finishes.';
+export const DOWNLOAD_HINT = 'Saves a zip of the included photos, their captions, and a small lora.json file. A .safetensors file is listed here only after a real training run finishes.';
+export const EDIT_HINT = 'Change the name, what this LoRA learns, the base model, or the trigger word. Captions that still start with the old trigger word are updated. These stay locked once training is queued.';
+export const REVIEW_HINT = 'Read and edit every caption in one list. Undo puts back the caption from before your last change on that photo.';
+export const SHOT_HINT = 'A person LoRA learns a face more steadily from a close-up, a side angle, the full figure, and more than one kind of light. Check these off as you look through the photos.';
 export const CONSENT_HINT = 'Required before training. Confirm that you took these photos, or that you have permission to train a model on them.';
 export const TRAIN_HINT = 'Queues training on the included photos. You need at least 5 photos and the permission checkbox. The LoRA file appears on this page when a GPU worker finishes.';
 export const DELETE_HINT = 'Removes this LoRA, its photos, and its download from your dashboard.';
