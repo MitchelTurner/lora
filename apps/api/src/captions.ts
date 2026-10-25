@@ -126,8 +126,8 @@ async function askAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 120,
-      temperature: 0.2,
+      max_tokens: 200,
+      thinking: { type: 'disabled' },
       messages: [{
         role: 'user',
         content: [
@@ -145,7 +145,11 @@ async function askAnthropic(
     }),
   });
   return readModelText(response, (payload) => {
-    const content = (payload as { content?: { type?: string; text?: string }[] }).content ?? [];
+    const body = payload as { stop_reason?: string; content?: { type?: string; text?: string }[] };
+    if (body.stop_reason === 'refusal') {
+      throw new CaptionError('The caption service declined to describe this photo.', 502);
+    }
+    const content = body.content ?? [];
     return content.filter((block) => block.type === 'text').map((block) => block.text ?? '').join(' ');
   });
 }
