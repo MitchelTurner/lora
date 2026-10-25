@@ -1,6 +1,22 @@
 import React from 'react';
 import { captionHelp, deletePhoto, deleteProject, downloadUrl, getProject, MISSING_LORA, submitTraining, suggestCaption, updatePhoto, updateProject, uploadPhotos, type BaseModel, type LoraType, type ProjectDetail } from './api';
 import { preparePhotos } from './photos';
+import { WorkerSetup } from './WorkerSetup';
+
+function WorkerDetails({ flux }: { flux: boolean }) {
+  const ref = React.useRef<HTMLDetailsElement>(null);
+  React.useLayoutEffect(() => {
+    if (ref.current) ref.current.open = true;
+  }, []);
+  return (
+    <details ref={ref} className="mt-4 rounded-2xl border border-line bg-white p-4">
+      <summary className="cursor-pointer text-sm font-semibold">Run the GPU worker on your computer</summary>
+      <div className="mt-3">
+        <WorkerSetup flux={flux} />
+      </div>
+    </details>
+  );
+}
 import { inspectPhoto, nearDuplicate } from './quality';
 import { CAPTION_HINT, CONSENT_HINT, COUNT_HINT, DELETE_HINT, DOWNLOAD_HINT, EDIT_HINT, ErrorNote, Hint, LEAVE_OUT_HINT, MODEL_HINT, MODEL_LABEL, REMOVE_HINT, REVIEW_HINT, SHOT_HINT, STATUS_HINT, STATUS_LABEL, SUGGEST_ALL_HINT, SUGGEST_HINT, SUGGEST_OFF_HINT, TRAIN_HINT, TRIGGER_HINT, TYPE_HINT, TYPE_LABEL, USE_PHOTO_HINT, hintLabel } from './ui';
 
@@ -616,9 +632,10 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
                 <div className="h-full rounded-full bg-moss" style={{ width: `${percent}%` }} />
               </div>
               {trainingError && <div className="mt-3"><ErrorNote>{trainingError}</ErrorNote></div>}
-              {queued && <p className="mt-3 text-sm text-ink/60">Your photos are saved. The photo set can be downloaded now.</p>}
+              {queued && <p className="mt-3 text-sm text-ink/60">Your photos are saved. The photo set can be downloaded now. Start the worker below on the computer with the GPU.</p>}
             </div>
           )}
+          <WorkerDetails flux={project.baseModel === 'FLUX1_DEV'} />
           {queued ? null : (
             <>
               <p className="mt-2 text-sm leading-relaxed text-ink/70">Submit at least {MIN_PHOTOS} photos you have the right to use. The job waits for a GPU. This page does not invent a model file.</p>

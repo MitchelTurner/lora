@@ -66,7 +66,7 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 className="font-serif text-4xl tracking-tight">Your LoRAs</h1>
-          <p className="mt-2 text-ink/70">Open one to add photos or download it.</p>
+          <p className="mt-2 text-ink/70">Open one to add photos or download it. The start command for your GPU is under GPU worker in the header.</p>
         </div>
       </div>
       <ul className="grid gap-4 sm:grid-cols-2">
@@ -94,7 +94,7 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
                 <p className="text-sm text-ink/65">{TYPE_LABEL[project.loraType]} · {MODEL_LABEL[project.baseModel]} · {project.includedCount} photos</p>
                 <p className="text-sm text-ink/50">Trigger word <span className="font-semibold text-ink">{project.triggerWord}</span></p>
                 {project.status === 'TRAINING' && (
-                  <p className="text-sm text-ink/70">{Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%. No .safetensors file yet. The GPU worker on your computer has to start the run.</p>
+                  <p className="text-sm text-ink/70">{Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%. No .safetensors file yet. Open this LoRA, or GPU worker in the header, and start the command on your computer.</p>
                 )}
                 {project.latestJob?.errorMessage && <p className="text-sm text-red-800">{project.latestJob.errorMessage}</p>}
               </div>

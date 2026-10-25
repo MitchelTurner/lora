@@ -1,5 +1,6 @@
 import React from 'react';
 import { adoptOwnerKey, isOwnerKey, ownerKey } from './session';
+import { WorkerSetup } from './WorkerSetup';
 
 export function Shell({
   children,
@@ -11,6 +12,7 @@ export function Shell({
   onCreate?: () => void;
 }) {
   const [recoveryOpen, setRecoveryOpen] = React.useState(false);
+  const [workerOpen, setWorkerOpen] = React.useState(false);
   const [code, setCode] = React.useState(ownerKey);
   const [draft, setDraft] = React.useState('');
   const [copied, setCopied] = React.useState(false);
@@ -34,7 +36,7 @@ export function Shell({
   return (
     <div className="min-h-screen bg-paper font-sans text-ink">
       <header className="sticky top-0 z-20 border-b border-line bg-paper/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-4">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-5 py-4">
           <button type="button" onClick={onHome} className="flex items-center gap-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-moss">
             <span className="grid h-9 w-9 grid-cols-2 gap-0.5 rounded-md bg-ink p-1.5" aria-hidden="true">
               <span className="bg-paper" />
@@ -44,8 +46,11 @@ export function Shell({
             </span>
             <span className="font-serif text-2xl leading-none tracking-tight">LoRA Forge</span>
           </button>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => { setRecoveryOpen((open) => !open); setCode(ownerKey()); setCopied(false); setRecoveryError(''); }} className="rounded-full px-3 py-2 text-sm font-semibold text-ink/70 hover:text-ink">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button type="button" onClick={() => { setWorkerOpen((open) => !open); setRecoveryOpen(false); }} className="rounded-full px-3 py-2 text-sm font-semibold text-ink/70 hover:text-ink">
+              GPU worker
+            </button>
+            <button type="button" onClick={() => { setRecoveryOpen((open) => !open); setWorkerOpen(false); setCode(ownerKey()); setCopied(false); setRecoveryError(''); }} className="rounded-full px-3 py-2 text-sm font-semibold text-ink/70 hover:text-ink">
               Recovery code
             </button>
             {onCreate && (
@@ -55,6 +60,16 @@ export function Shell({
             )}
           </div>
         </div>
+        {workerOpen && (
+          <div className="border-t border-line bg-card">
+            <div className="mx-auto max-w-5xl px-5 py-4">
+              <p className="font-serif text-2xl tracking-tight">Run training on your GPU</p>
+              <div className="mt-3">
+                <WorkerSetup />
+              </div>
+            </div>
+          </div>
+        )}
         {recoveryOpen && (
           <div className="border-t border-line bg-card">
             <div className="mx-auto grid max-w-5xl gap-4 px-5 py-4 md:grid-cols-2">
