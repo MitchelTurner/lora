@@ -1,28 +1,10 @@
 import React from 'react';
 
 function commands(origin: string) {
-  const windowsInstall = [
-    'git clone https://github.com/MitchelTurner/lora.git',
-    'cd lora\\workers\\trainer',
-    'py -m pip install torch --index-url https://download.pytorch.org/whl/cu124',
-    'py -m pip install -r requirements.txt',
-    `py -m trainer --token paste-your-token --api ${origin}`,
-  ].join('\n');
-  const windowsStart = [
-    'cd lora\\workers\\trainer',
-    `py -m trainer --token paste-your-token --api ${origin}`,
-  ].join('\n');
-  const unixInstall = [
-    'git clone https://github.com/MitchelTurner/lora.git',
-    'cd lora/workers/trainer',
-    'python3 -m pip install torch --index-url https://download.pytorch.org/whl/cu124',
-    'python3 -m pip install -r requirements.txt',
-    `python3 -m trainer --token paste-your-token --api ${origin}`,
-  ].join('\n');
-  const unixStart = [
-    'cd lora/workers/trainer',
-    `python3 -m trainer --token paste-your-token --api ${origin}`,
-  ].join('\n');
+  const windowsInstall = `cd /d %USERPROFILE% && git clone https://github.com/MitchelTurner/lora.git && cd /d %USERPROFILE%\\lora\\workers\\trainer && py -m pip install torch --index-url https://download.pytorch.org/whl/cu124 && py -m pip install -r requirements.txt && py -m trainer --token paste-your-token --api ${origin}`;
+  const windowsStart = `cd /d %USERPROFILE%\\lora\\workers\\trainer && py -m trainer --token paste-your-token --api ${origin}`;
+  const unixInstall = `cd "$HOME" && git clone https://github.com/MitchelTurner/lora.git && cd "$HOME/lora/workers/trainer" && python3 -m pip install torch --index-url https://download.pytorch.org/whl/cu124 && python3 -m pip install -r requirements.txt && python3 -m trainer --token paste-your-token --api ${origin}`;
+  const unixStart = `cd "$HOME/lora/workers/trainer" && python3 -m trainer --token paste-your-token --api ${origin}`;
   return { windowsInstall, windowsStart, unixInstall, unixStart };
 }
 
@@ -89,7 +71,7 @@ export function WorkerSetup({ flux = false }: { flux?: boolean }) {
     <div>
       <div className="space-y-2 text-sm leading-relaxed text-ink/70">
         <p>This page cannot start the GPU. Leave Command Prompt open on the computer with the NVIDIA card. The worker trains the next SDXL job and uploads the .safetensors file. The percentage stays at 0% until that window is running.</p>
-        <p>On Windows, open Command Prompt. Run the lines from top to bottom. <span className="font-semibold text-ink">requirements.txt</span> is inside <span className="font-semibold text-ink">lora\workers\trainer</span>, not in your user folder. The <span className="font-semibold text-ink">$env:</span> lines are PowerShell and will fail in Command Prompt.</p>
+        <p>On Windows, open Command Prompt. Copy the Windows line, paste it as one line, and press Enter once. Pasting several lines at once joins them into a bad path.</p>
         <p>On the API service, set <span className="font-semibold text-ink">WORKER_TOKEN</span> to a long secret and restart that service. Paste the same secret in place of <span className="font-semibold text-ink">paste-your-token</span>.</p>
         {flux && <p className="text-sm text-red-800" role="alert">This worker trains SDXL. A Flux job stays waiting, because this computer cannot finish it.</p>}
       </div>
