@@ -174,7 +174,7 @@ export const MODEL_LABEL: Record<string, string> = {
 export const STATUS_HINT: Record<string, string> = {
   DRAFT: 'This LoRA still needs photos. Add at least 5 included photos before you can submit training.',
   READY: 'At least 5 photos are included. You can submit training whenever you are ready.',
-  TRAINING: 'Training has not started. A GPU worker has to pick up the job. Your photos stay here, and the .safetensors file appears when a real run finishes.',
+  TRAINING: 'Training stays at 0% until a GPU worker picks up the job. No .safetensors file is written before that. Your photos stay here.',
   COMPLETED: 'Training finished. Open this LoRA to download the model file.',
   FAILED: 'Training did not finish. Open this LoRA to see what needs another try.',
 };
@@ -204,6 +204,6 @@ export const EDIT_HINT = 'Change the name, what this LoRA learns, the base model
 export const REVIEW_HINT = 'Read and edit every caption in one list. Undo puts back the caption from before your last change on that photo.';
 export const SHOT_HINT = 'A person LoRA learns a face more steadily from a close-up, a side angle, the full figure, and more than one kind of light. Check these off as you look through the photos.';
 export const CONSENT_HINT = 'Required before training. Confirm that you took these photos, or that you have permission to train a model on them.';
-export const TRAIN_HINT = 'Queues training on the included photos. You need at least 5 photos and the permission checkbox. The LoRA file appears on this page when a GPU worker finishes.';
+export const TRAIN_HINT = 'Queues training on the included photos. You need at least 5 photos and the permission checkbox. The percentage stays at 0% and no .safetensors file is written until a GPU worker starts the run.';
 export const DELETE_HINT = 'Removes this LoRA, its photos, and its download from your dashboard.';
 export const COUNT_HINT = 'Included photos are the ones used for training and the zip. Uploaded counts every photo, including ones you left out. A project holds up to 50.';

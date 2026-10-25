@@ -5,6 +5,20 @@ import { inspectPhoto, nearDuplicate } from './quality';
 import { CAPTION_HINT, CONSENT_HINT, COUNT_HINT, DELETE_HINT, DOWNLOAD_HINT, EDIT_HINT, ErrorNote, Hint, LEAVE_OUT_HINT, MODEL_HINT, MODEL_LABEL, REMOVE_HINT, REVIEW_HINT, SHOT_HINT, STATUS_HINT, STATUS_LABEL, SUGGEST_ALL_HINT, SUGGEST_HINT, SUGGEST_OFF_HINT, TRAIN_HINT, TRIGGER_HINT, TYPE_HINT, TYPE_LABEL, USE_PHOTO_HINT, hintLabel } from './ui';
 
 const MIN_PHOTOS = 5;
+
+function jobPercent(progress: number): number {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+const JOB_LABEL: Record<string, string> = {
+  queued: 'Waiting for a GPU',
+  preprocessing: 'Preparing photos',
+  training: 'Training',
+  succeeded: 'Training finished',
+  failed: 'Training stopped',
+  canceled: 'Training canceled',
+};
 const SHOTS = [
   { id: 'close', label: 'Close-up of the face' },
   { id: 'side', label: 'A side angle' },
@@ -311,7 +325,14 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   }
   if (!project) return <p className="text-ink/60">Loading this LoRA…</p>;
 
-  const queued = project.latestJob && ['queued', 'preprocessing', 'training'].includes(project.latestJob.status);
+  const job = project.latestJob;
+  const queued = Boolean(job && ['queued', 'preprocessing', 'training'].includes(job.status));
+  const percent = job ? jobPercent(job.progress) : 0;
+  const statusText = project.status === 'TRAINING' && job ? `${STATUS_LABEL.TRAINING} · ${percent}%` : STATUS_LABEL[project.status];
+  const waitingOnGpu = Boolean(job && job.status === 'queued' && percent === 0);
+  const trainingError = job?.errorMessage
+    || (job?.status === 'failed' ? 'Training stopped before a .safetensors file was written.' : '')
+    || (waitingOnGpu ? 'No .safetensors file is being written. Training stays at 0% until a GPU worker picks up this job.' : '');
   const readyCount = project.includedCount;
 
   return (
@@ -320,7 +341,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <Hint inline hint={STATUS_HINT[project.status] ?? 'Where this LoRA is in the process.'}>
-            {(describedBy) => <span aria-describedby={describedBy} className={`text-sm font-semibold uppercase tracking-[0.14em] text-moss ${hintLabel}`}>{STATUS_LABEL[project.status]}</span>}
+            {(describedBy) => <span aria-describedby={describedBy} className={`text-sm font-semibold uppercase tracking-[0.14em] text-moss ${hintLabel}`}>{statusText}</span>}
           </Hint>
           <h1 className="mt-1 font-serif text-5xl tracking-tight">{project.name}</h1>
           <Hint hint={EDIT_HINT} className="mt-2">
@@ -545,7 +566,9 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
             <a key={artifact.id} href={artifact.url} className="mt-4 inline-flex rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper">{artifact.filename}</a>
           ))}
           {(project.artifacts ?? []).every((artifact) => artifact.type !== 'lora') && (
-            <p className="mt-3 text-sm text-ink/60">No .safetensors file yet.</p>
+            <p className="mt-3 text-sm text-ink/60">
+              No .safetensors file yet.{job ? ` Training is at ${percent}%.` : ''}
+            </p>
           )}
           <Hint hint={DOWNLOAD_HINT} className="mt-5">
             {(describedBy) => (
@@ -576,9 +599,27 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
               )}
             </Hint>
           )}
-          {queued ? (
-            <p className="mt-2 text-sm leading-relaxed text-ink/70">Waiting for a GPU. Training has not started. Your photos are saved, and the photo set can be downloaded now. The .safetensors file shows up here when a real run finishes.</p>
-          ) : (
+          {job && (queued || job.status === 'failed' || job.errorMessage) && (
+            <div className="mt-4">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-sm font-semibold">{JOB_LABEL[job.status] ?? 'Training'}</p>
+                <p className="font-serif text-4xl tabular-nums tracking-tight">{percent}%</p>
+              </div>
+              <div
+                className="mt-2 h-2.5 overflow-hidden rounded-full bg-paper"
+                role="progressbar"
+                aria-valuenow={percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Training progress"
+              >
+                <div className="h-full rounded-full bg-moss" style={{ width: `${percent}%` }} />
+              </div>
+              {trainingError && <div className="mt-3"><ErrorNote>{trainingError}</ErrorNote></div>}
+              {queued && <p className="mt-3 text-sm text-ink/60">Your photos are saved. The photo set can be downloaded now.</p>}
+            </div>
+          )}
+          {queued ? null : (
             <>
               <p className="mt-2 text-sm leading-relaxed text-ink/70">Submit at least {MIN_PHOTOS} photos you have the right to use. The job waits for a GPU. This page does not invent a model file.</p>
               {project.loraType === 'CHARACTER' && SHOTS.some((shot) => !shots[shot.id]) && (

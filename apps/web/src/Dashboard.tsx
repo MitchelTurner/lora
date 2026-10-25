@@ -83,11 +83,20 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="font-serif text-2xl leading-tight">{project.name}</h2>
                   <Hint inline hint={STATUS_HINT[project.status] ?? 'Where this LoRA is in the process.'}>
-                    {(describedBy) => <span aria-describedby={describedBy} className="shrink-0 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-moss underline decoration-dotted decoration-moss/40 underline-offset-2">{STATUS_LABEL[project.status]}</span>}
+                    {(describedBy) => (
+                      <span aria-describedby={describedBy} className="shrink-0 rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-moss underline decoration-dotted decoration-moss/40 underline-offset-2">
+                        {STATUS_LABEL[project.status]}
+                        {project.status === 'TRAINING' && project.latestJob ? ` · ${Math.max(0, Math.min(100, Math.round(project.latestJob.progress)))}%` : ''}
+                      </span>
+                    )}
                   </Hint>
                 </div>
                 <p className="text-sm text-ink/65">{TYPE_LABEL[project.loraType]} · {MODEL_LABEL[project.baseModel]} · {project.includedCount} photos</p>
                 <p className="text-sm text-ink/50">Trigger word <span className="font-semibold text-ink">{project.triggerWord}</span></p>
+                {project.status === 'TRAINING' && (
+                  <p className="text-sm text-ink/70">{Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%. No .safetensors file yet. A GPU worker has to start the run.</p>
+                )}
+                {project.latestJob?.errorMessage && <p className="text-sm text-red-800">{project.latestJob.errorMessage}</p>}
               </div>
             </button>
           </li>
