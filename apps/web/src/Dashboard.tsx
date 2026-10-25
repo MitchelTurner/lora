@@ -94,7 +94,7 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
                 <p className="text-sm text-ink/65">{TYPE_LABEL[project.loraType]} · {MODEL_LABEL[project.baseModel]} · {project.includedCount} photos</p>
                 <p className="text-sm text-ink/50">Trigger word <span className="font-semibold text-ink">{project.triggerWord}</span></p>
                 {project.status === 'TRAINING' && (
-                  <p className="text-sm text-ink/70">{Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%. No .safetensors file yet. A GPU worker has to start the run.</p>
+                  <p className="text-sm text-ink/70">{Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%. No .safetensors file yet. The GPU worker on your computer has to start the run.</p>
                 )}
                 {project.latestJob?.errorMessage && <p className="text-sm text-red-800">{project.latestJob.errorMessage}</p>}
               </div>

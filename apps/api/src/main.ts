@@ -1,4 +1,5 @@
 import Busboy from 'busboy';
+import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -8,17 +9,22 @@ import {
   LORA_TYPES,
   MAX_IMAGES,
   absolutePath,
+  claimJob,
+  completeJob,
   createProject,
   dataDir,
   deleteImage,
   deleteProject,
+  failJob,
   getProject,
+  getRunningJob,
   includedImages,
   listProjects,
   ownerIdFromKey,
   saveImage,
   submitTraining,
   updateImage,
+  updateJobProgress,
   updateProject,
   type BaseModel,
   type LoraType,
@@ -27,6 +33,7 @@ import {
 
 const DEFAULT_PORT = 3000;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_MODEL_BYTES = 512 * 1024 * 1024;
 
 function listenPort(): number {
   const raw = process.env.PORT;
@@ -165,6 +172,83 @@ function readOwnerKey(req: IncomingMessage): string | undefined {
   }
 }
 
+function workerToken(): string {
+  return process.env.WORKER_TOKEN?.trim() ?? '';
+}
+
+function workerAuthorized(req: IncomingMessage): boolean {
+  const expected = workerToken();
+  if (!expected) return false;
+  const header = req.headers.authorization ?? '';
+  const match = /^Bearer\s+(\S+)\s*$/i.exec(Array.isArray(header) ? header[0] ?? '' : header);
+  const presented = match?.[1] ?? '';
+  const left = Buffer.from(presented);
+  const right = Buffer.from(expected);
+  if (left.length === 0 || left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+function requireWorker(req: IncomingMessage, res: ServerResponse): boolean {
+  if (!workerToken()) {
+    sendError(res, 503, 'Set WORKER_TOKEN on the API service, then use that same token on the computer with the GPU.');
+    return false;
+  }
+  if (!workerAuthorized(req)) {
+    sendError(res, 401, 'The GPU worker token was rejected.');
+    return false;
+  }
+  return true;
+}
+
+function isSafetensors(buffer: Buffer): boolean {
+  if (buffer.length < 16) return false;
+  const headerLength = Number(buffer.readBigUInt64LE(0));
+  if (!Number.isSafeInteger(headerLength) || headerLength < 2 || headerLength > buffer.length - 8) return false;
+  const header = buffer.subarray(8, 8 + headerLength).toString('utf8');
+  if (!header.startsWith('{') || !header.endsWith('}')) return false;
+  try {
+    const parsed = JSON.parse(header) as Record<string, unknown>;
+    return Object.keys(parsed).some((key) => key !== '__metadata__');
+  } catch {
+    return false;
+  }
+}
+
+function modelFilename(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'lora';
+  return `${slug}.safetensors`;
+}
+
+function readModel(req: IncomingMessage): Promise<{ buffer?: Buffer; tooBig: boolean }> {
+  return new Promise((resolve, reject) => {
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: { files: 1, fileSize: MAX_MODEL_BYTES },
+    });
+    let model: Buffer | undefined;
+    let tooBig = false;
+    const pending: Promise<void>[] = [];
+    busboy.on('file', (_name, file) => {
+      const chunks: Buffer[] = [];
+      file.on('data', (chunk: Buffer) => chunks.push(chunk));
+      file.on('limit', () => {
+        tooBig = true;
+      });
+      pending.push(new Promise((done) => {
+        file.on('close', () => {
+          if (!tooBig) model = Buffer.concat(chunks);
+          done();
+        });
+      }));
+    });
+    busboy.on('error', reject);
+    busboy.on('finish', () => {
+      void Promise.all(pending).then(() => resolve({ buffer: model, tooBig }));
+    });
+    req.pipe(busboy);
+  });
+}
+
 function requireOwner(req: IncomingMessage, res: ServerResponse): string | undefined {
   const key = readOwnerKey(req);
   if (!key) {
@@ -275,8 +359,78 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   const path = requestPath(req);
   if (req.method === 'GET' && (path === '/' || path === '/health')) {
-    sendJson(res, 200, { name: 'lora-forge', status: 'ok' });
+    sendJson(res, 200, { name: 'lora-forge', status: 'ok', gpuWorker: Boolean(workerToken()) });
     return;
+  }
+
+  if (path === '/api/worker/claim' && req.method === 'POST') {
+    if (!requireWorker(req, res)) return;
+    const job = await claimJob();
+    if (!job) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    sendJson(res, 200, job);
+    return;
+  }
+
+  const workerJobMatch = path.match(/^\/api\/worker\/jobs\/([^/]+)(?:\/(dataset|progress|fail|artifact))?$/);
+  if (workerJobMatch) {
+    if (!requireWorker(req, res)) return;
+    const jobId = workerJobMatch[1] ?? '';
+    const action = workerJobMatch[2] ?? '';
+    if (action === 'dataset' && req.method === 'GET') {
+      const project = getRunningJob(jobId);
+      if (!project) {
+        sendError(res, 404, 'That training job is not running.');
+        return;
+      }
+      await sendZip(res, project);
+      return;
+    }
+    if (action === 'progress' && req.method === 'POST') {
+      const body = await readJson(req);
+      const progress = typeof body.progress === 'number' ? body.progress : Number.NaN;
+      const status = body.status === 'preprocessing' || body.status === 'training' ? body.status : 'training';
+      if (!Number.isFinite(progress)) {
+        sendError(res, 400, 'Progress must be a percentage.');
+        return;
+      }
+      await updateJobProgress(jobId, progress, status);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (action === 'fail' && req.method === 'POST') {
+      const body = await readJson(req);
+      const error = typeof body.error === 'string' ? body.error.trim() : '';
+      if (!error) {
+        sendError(res, 400, 'Say what stopped training.');
+        return;
+      }
+      await failJob(jobId, error);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (action === 'artifact' && req.method === 'POST') {
+      const project = getRunningJob(jobId);
+      if (!project) {
+        sendError(res, 404, 'That training job is not running.');
+        return;
+      }
+      const model = await readModel(req);
+      if (model.tooBig) {
+        sendError(res, 400, 'That model file is larger than 512 MB.');
+        return;
+      }
+      if (!model.buffer || !isSafetensors(model.buffer)) {
+        sendError(res, 400, 'The trainer did not produce a .safetensors model file.');
+        return;
+      }
+      const saved = await completeJob(jobId, { filename: modelFilename(project.triggerWord), buffer: model.buffer });
+      sendJson(res, 201, projectDetail(saved));
+      return;
+    }
   }
 
   if (req.method === 'GET' && path === '/api/projects') {

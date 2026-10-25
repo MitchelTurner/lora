@@ -33,6 +33,7 @@ export interface TrainingJob {
   consentConfirmedAt: string;
   errorMessage?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface TrainingArtifact {
@@ -284,6 +285,136 @@ export function submitTraining(projectId: string, ownerId: string, consentStatem
     project.status = 'TRAINING';
     project.updatedAt = now;
     return project;
+  });
+}
+
+const STALE_JOB_MS = 30 * 60 * 1000;
+
+export interface ClaimedJob {
+  jobId: string;
+  projectId: string;
+  name: string;
+  triggerWord: string;
+  baseModel: BaseModel;
+  loraType: LoraType;
+  imageCount: number;
+}
+
+function jobStamp(job: TrainingJob): number {
+  return Date.parse(job.updatedAt ?? job.createdAt);
+}
+
+function claimable(job: TrainingJob, now: number): boolean {
+  if (job.status === 'queued') return true;
+  if (job.status !== 'preprocessing' && job.status !== 'training') return false;
+  return now - jobStamp(job) > STALE_JOB_MS;
+}
+
+function findJob(db: Database, jobId: string): { project: TrainingProject; job: TrainingJob } | undefined {
+  for (const project of db.projects) {
+    const job = project.jobs.find((item) => item.id === jobId);
+    if (job) return { project, job };
+  }
+  return undefined;
+}
+
+export function claimJob(): Promise<ClaimedJob | null> {
+  return update((db) => {
+    const now = Date.now();
+    let best: { project: TrainingProject; job: TrainingJob } | undefined;
+    for (const project of db.projects) {
+      for (const job of project.jobs) {
+        if (!claimable(job, now)) continue;
+        if (!best || job.createdAt < best.job.createdAt) best = { project, job };
+      }
+    }
+    if (!best) return null;
+    const stamp = new Date(now).toISOString();
+    best.job.status = 'preprocessing';
+    best.job.progress = 1;
+    delete best.job.errorMessage;
+    best.job.updatedAt = stamp;
+    best.project.status = 'TRAINING';
+    best.project.updatedAt = stamp;
+    return {
+      jobId: best.job.id,
+      projectId: best.project.id,
+      name: best.project.name,
+      triggerWord: best.project.triggerWord,
+      baseModel: best.project.baseModel,
+      loraType: best.project.loraType,
+      imageCount: includedImages(best.project).length,
+    };
+  });
+}
+
+export function getRunningJob(jobId: string): TrainingProject | undefined {
+  const db = readDb();
+  const found = findJob(db, jobId);
+  if (!found) return undefined;
+  if (found.job.status !== 'preprocessing' && found.job.status !== 'training') return undefined;
+  return found.project;
+}
+
+export function updateJobProgress(jobId: string, progress: number, status: 'preprocessing' | 'training'): Promise<void> {
+  return update((db) => {
+    const found = findJob(db, jobId);
+    if (!found || (found.job.status !== 'preprocessing' && found.job.status !== 'training')) {
+      throw new Error('That training job is not running.');
+    }
+    const stamp = new Date().toISOString();
+    found.job.status = status;
+    found.job.progress = Math.max(0, Math.min(99, Math.round(progress)));
+    delete found.job.errorMessage;
+    found.job.updatedAt = stamp;
+    found.project.status = 'TRAINING';
+    found.project.updatedAt = stamp;
+  });
+}
+
+export function failJob(jobId: string, errorMessage: string): Promise<void> {
+  return update((db) => {
+    const found = findJob(db, jobId);
+    if (!found || (found.job.status !== 'preprocessing' && found.job.status !== 'training')) {
+      throw new Error('That training job is not running.');
+    }
+    const stamp = new Date().toISOString();
+    found.job.status = 'failed';
+    found.job.errorMessage = errorMessage.trim().slice(0, 500) || 'Training stopped.';
+    found.job.updatedAt = stamp;
+    found.project.status = 'FAILED';
+    found.project.updatedAt = stamp;
+  });
+}
+
+export function completeJob(jobId: string, file: { filename: string; buffer: Buffer }): Promise<TrainingProject> {
+  return update((db) => {
+    const found = findJob(db, jobId);
+    if (!found || (found.job.status !== 'preprocessing' && found.job.status !== 'training')) {
+      throw new Error('That training job is not running.');
+    }
+    const stamp = new Date().toISOString();
+    const artifactId = randomUUID();
+    const storageKey = join('artifacts', found.project.id, `${artifactId}.safetensors`);
+    const absolute = join(dataDir(), storageKey);
+    mkdirSync(dirname(absolute), { recursive: true });
+    writeFileSync(absolute, file.buffer);
+    found.project.artifacts.unshift({
+      id: artifactId,
+      jobId,
+      type: 'lora',
+      filename: file.filename,
+      storageKey,
+      sizeBytes: file.buffer.length,
+      createdAt: stamp,
+    });
+    found.job.status = 'succeeded';
+    found.job.progress = 100;
+    delete found.job.errorMessage;
+    found.job.updatedAt = stamp;
+    found.project.status = 'COMPLETED';
+    found.project.updatedAt = stamp;
+    return found.project;
   });
 }
 

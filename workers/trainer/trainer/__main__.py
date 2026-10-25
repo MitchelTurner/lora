@@ -1,1 +1,4 @@
-"""Entry point: accepts a config JSON + dataset manifest (implemented in step 6)."""
+from trainer.loop import main
+
+if __name__ == '__main__':
+    main()

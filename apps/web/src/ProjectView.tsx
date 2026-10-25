@@ -126,7 +126,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
           setError(message);
         }
       });
-    }, 15000);
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [id, project?.status]);
 
@@ -332,7 +332,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   const waitingOnGpu = Boolean(job && job.status === 'queued' && percent === 0);
   const trainingError = job?.errorMessage
     || (job?.status === 'failed' ? 'Training stopped before a .safetensors file was written.' : '')
-    || (waitingOnGpu ? 'No .safetensors file is being written. Training stays at 0% until a GPU worker picks up this job.' : '');
+    || (waitingOnGpu ? 'No .safetensors file is being written. Training stays at 0% until the GPU worker on your computer picks up this job.' : '');
   const readyCount = project.includedCount;
 
   return (
@@ -606,7 +606,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
                 <p className="font-serif text-4xl tabular-nums tracking-tight">{percent}%</p>
               </div>
               <div
-                className="mt-2 h-2.5 overflow-hidden rounded-full bg-paper"
+                className="mt-2 h-2.5 overflow-hidden rounded-full bg-line"
                 role="progressbar"
                 aria-valuenow={percent}
                 aria-valuemin={0}
