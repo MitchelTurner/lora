@@ -1,4 +1,5 @@
 import React from 'react';
+import { gpuLine, useGpu } from './useGpu';
 
 function safeToken(value: string): string {
   const token = value.trim();
@@ -75,10 +76,14 @@ export function WorkerSetup({ flux = false }: { flux?: boolean }) {
   const ready = safeToken(token);
   const script = commands(origin, ready || 'YOUR-TOKEN');
   const invalid = token.trim() !== '' && ready === '';
+  const gpu = useGpu();
 
   return (
     <div>
       <div className="space-y-2 text-sm leading-relaxed text-ink/70">
+        {gpu === null && <p>Checking for a GPU…</p>}
+        {gpu?.connected && <p className="font-semibold text-ink">{gpuLine(gpu)}</p>}
+        {gpu && !gpu.connected && <p>No GPU is connected yet. Start the command below and leave that window open.</p>}
         <p>This page cannot start the GPU. Leave Command Prompt open on the computer with the NVIDIA card. The worker trains the next SDXL job and uploads the .safetensors file. The percentage stays at 0% until that window is running.</p>
         <p>On Windows, open Command Prompt. Type the token below, copy the Windows line, paste it as one line, and press Enter once. The line uses Python 3.11, because the newest Python has no CUDA build of PyTorch. Git is not required. The line downloads the project as a zip.</p>
         <p>On the API service, set <span className="font-semibold text-ink">WORKER_TOKEN</span> to the same letters and numbers, then restart that service.</p>

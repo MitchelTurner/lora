@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { CaptionError, captionHelpAvailable, suggestCaption } from './captions';
+import { currentGpu, recordGpu } from './gpu';
 import {
   BASE_MODELS,
   LORA_TYPES,
@@ -363,6 +364,24 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
 
+  if (path === '/api/gpu' && req.method === 'GET') {
+    if (!requireOwner(req, res)) return;
+    const gpu = currentGpu();
+    sendJson(res, 200, gpu ? { connected: true, ...gpu } : { connected: false });
+    return;
+  }
+
+  if (path === '/api/worker/heartbeat' && req.method === 'POST') {
+    if (!requireWorker(req, res)) return;
+    try {
+      const report = recordGpu(await readJson(req));
+      sendJson(res, 200, { ok: true, seenAt: report.seenAt });
+    } catch (error) {
+      sendError(res, 400, error instanceof Error ? error.message : 'The GPU report could not be saved.');
+    }
+    return;
+  }
+
   if (path === '/api/worker/claim' && req.method === 'POST') {
     if (!requireWorker(req, res)) return;
     const job = await claimJob();
@@ -393,11 +412,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const body = await readJson(req);
       const progress = typeof body.progress === 'number' ? body.progress : Number.NaN;
       const status = body.status === 'preprocessing' || body.status === 'training' ? body.status : 'training';
+      const stage = typeof body.stage === 'string' ? body.stage.replace(/\s+/g, ' ').trim().slice(0, 180) : '';
       if (!Number.isFinite(progress)) {
         sendError(res, 400, 'Progress must be a percentage.');
         return;
       }
-      await updateJobProgress(jobId, progress, status);
+      await updateJobProgress(jobId, progress, status, stage);
       sendJson(res, 200, { ok: true });
       return;
     }

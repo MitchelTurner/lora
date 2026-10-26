@@ -1,6 +1,7 @@
 import React from 'react';
 import { captionHelp, deletePhoto, deleteProject, downloadUrl, getProject, MISSING_LORA, submitTraining, suggestCaption, updatePhoto, updateProject, uploadPhotos, type BaseModel, type LoraType, type ProjectDetail } from './api';
 import { preparePhotos } from './photos';
+import { gpuLine, useGpu } from './useGpu';
 import { WorkerSetup } from './WorkerSetup';
 
 function WorkerDetails({ flux }: { flux: boolean }) {
@@ -29,7 +30,7 @@ function jobPercent(progress: number): number {
 
 const JOB_LABEL: Record<string, string> = {
   queued: 'Waiting for a GPU',
-  preprocessing: 'Preparing photos',
+  preprocessing: 'Loading the model',
   training: 'Training',
   succeeded: 'Training finished',
   failed: 'Training stopped',
@@ -64,6 +65,7 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   const [photoNotes, setPhotoNotes] = React.useState<Record<string, { soft: boolean; small: boolean; duplicate: boolean }>>({});
   const [priorCaptions, setPriorCaptions] = React.useState<Record<string, string>>({});
   const [shots, setShots] = React.useState<Record<string, boolean>>({});
+  const gpu = useGpu();
   const photosRef = React.useRef<HTMLUListElement>(null);
   const uploadRef = React.useRef<(list: FileList | File[]) => void>(() => {});
 
@@ -346,9 +348,10 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
   const percent = job ? jobPercent(job.progress) : 0;
   const statusText = project.status === 'TRAINING' && job ? `${STATUS_LABEL.TRAINING} · ${percent}%` : STATUS_LABEL[project.status];
   const waitingOnGpu = Boolean(job && job.status === 'queued' && percent === 0);
+  const stage = job?.stage?.trim() ?? '';
   const trainingError = job?.errorMessage
     || (job?.status === 'failed' ? 'Training stopped before a .safetensors file was written.' : '')
-    || (waitingOnGpu ? 'No .safetensors file is being written. Training stays at 0% until the GPU worker on your computer picks up this job.' : '');
+    || (waitingOnGpu && !gpu?.connected ? 'No .safetensors file is being written. Training stays at 0% until the GPU worker on your computer picks up this job.' : '');
   const readyCount = project.includedCount;
 
   return (
@@ -631,8 +634,10 @@ export function ProjectView({ id, onBack }: { id: string; onBack: () => void }) 
               >
                 <div className="h-full rounded-full bg-moss" style={{ width: `${percent}%` }} />
               </div>
+              {stage && <p className="mt-3 text-sm text-ink/70">{stage}</p>}
+              {!stage && waitingOnGpu && gpu?.connected && <p className="mt-3 text-sm text-ink/70">{gpuLine(gpu)}</p>}
               {trainingError && <div className="mt-3"><ErrorNote>{trainingError}</ErrorNote></div>}
-              {queued && <p className="mt-3 text-sm text-ink/60">Your photos are saved. The photo set can be downloaded now. Start the worker below on the computer with the GPU.</p>}
+              {queued && <p className="mt-3 text-sm text-ink/60">{gpu?.connected ? 'Your photos are saved. Leave the GPU window open.' : 'Your photos are saved. The photo set can be downloaded now. Start the worker below on the computer with the GPU.'}</p>}
             </div>
           )}
           <WorkerDetails flux={project.baseModel === 'FLUX1_DEV'} />

@@ -32,6 +32,7 @@ export interface TrainingJob {
   consentStatement: string;
   consentConfirmedAt: string;
   errorMessage?: string;
+  stage?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -333,6 +334,7 @@ export function claimJob(): Promise<ClaimedJob | null> {
     best.job.status = 'preprocessing';
     best.job.progress = 1;
     delete best.job.errorMessage;
+    delete best.job.stage;
     best.job.updatedAt = stamp;
     best.project.status = 'TRAINING';
     best.project.updatedAt = stamp;
@@ -356,7 +358,7 @@ export function getRunningJob(jobId: string): TrainingProject | undefined {
   return found.project;
 }
 
-export function updateJobProgress(jobId: string, progress: number, status: 'preprocessing' | 'training'): Promise<void> {
+export function updateJobProgress(jobId: string, progress: number, status: 'preprocessing' | 'training', stage?: string): Promise<void> {
   return update((db) => {
     const found = findJob(db, jobId);
     if (!found || (found.job.status !== 'preprocessing' && found.job.status !== 'training')) {
@@ -366,6 +368,7 @@ export function updateJobProgress(jobId: string, progress: number, status: 'prep
     found.job.status = status;
     found.job.progress = Math.max(0, Math.min(99, Math.round(progress)));
     delete found.job.errorMessage;
+    if (stage) found.job.stage = stage;
     found.job.updatedAt = stamp;
     found.project.status = 'TRAINING';
     found.project.updatedAt = stamp;
@@ -381,6 +384,7 @@ export function failJob(jobId: string, errorMessage: string): Promise<void> {
     const stamp = new Date().toISOString();
     found.job.status = 'failed';
     found.job.errorMessage = errorMessage.trim().slice(0, 500) || 'Training stopped.';
+    delete found.job.stage;
     found.job.updatedAt = stamp;
     found.project.status = 'FAILED';
     found.project.updatedAt = stamp;
@@ -411,6 +415,7 @@ export function completeJob(jobId: string, file: { filename: string; buffer: Buf
     found.job.status = 'succeeded';
     found.job.progress = 100;
     delete found.job.errorMessage;
+    delete found.job.stage;
     found.job.updatedAt = stamp;
     found.project.status = 'COMPLETED';
     found.project.updatedAt = stamp;

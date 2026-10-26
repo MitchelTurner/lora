@@ -17,7 +17,17 @@ export interface TrainingJob {
   consentStatement: string;
   consentConfirmedAt: string;
   errorMessage?: string;
+  stage?: string;
   createdAt: string;
+}
+
+export interface GpuStatus {
+  connected: boolean;
+  gpuName?: string;
+  totalMb?: number;
+  freeMb?: number;
+  modelCached?: boolean;
+  stage?: string;
 }
 
 export interface DatasetImage {
@@ -76,6 +86,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message === 'That LoRA could not be found.' ? MISSING_LORA : message);
   }
   return body as T;
+}
+
+export function getGpu(): Promise<GpuStatus> {
+  return request('/api/gpu');
 }
 
 export function listProjects(): Promise<{ projects: ProjectSummary[] }> {

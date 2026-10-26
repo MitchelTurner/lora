@@ -1,10 +1,12 @@
 import React from 'react';
 import { listProjects, type ProjectSummary } from './api';
 import { ErrorNote, Hint, MODEL_LABEL, STATUS_HINT, STATUS_LABEL, TYPE_LABEL } from './ui';
+import { gpuLine, useGpu } from './useGpu';
 
 export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; onCreate: () => void }) {
   const [projects, setProjects] = React.useState<ProjectSummary[] | null>(null);
   const [error, setError] = React.useState('');
+  const gpu = useGpu();
 
   const loaded = React.useRef(false);
 
@@ -94,7 +96,14 @@ export function Dashboard({ onOpen, onCreate }: { onOpen: (id: string) => void; 
                 <p className="text-sm text-ink/65">{TYPE_LABEL[project.loraType]} · {MODEL_LABEL[project.baseModel]} · {project.includedCount} photos</p>
                 <p className="text-sm text-ink/50">Trigger word <span className="font-semibold text-ink">{project.triggerWord}</span></p>
                 {project.status === 'TRAINING' && (
-                  <p className="text-sm text-ink/70">{Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%. No .safetensors file yet. Open this LoRA, or GPU worker in the header, and start the command on your computer.</p>
+                  <p className="text-sm text-ink/70">
+                    {Math.max(0, Math.min(100, Math.round(project.latestJob?.progress ?? 0)))}%.{' '}
+                    {project.latestJob?.stage
+                      ? project.latestJob.stage
+                      : gpu?.connected
+                        ? gpuLine(gpu)
+                        : 'No .safetensors file yet. Open this LoRA, or GPU worker in the header, and start the command on your computer.'}
+                  </p>
                 )}
                 {project.latestJob?.errorMessage && <p className="text-sm text-red-800">{project.latestJob.errorMessage}</p>}
               </div>

@@ -38,8 +38,12 @@ def main() -> None:
             'Run this from the lora\\workers\\trainer folder.'
         )
     ensure_gpu()
+    from trainer.model_cache import model_is_cached, warm_base_model
     print(f'GPU worker watching {base}', flush=True)
+    warm_base_model(lambda stage: heartbeat(base, token, stage))
     while True:
+        idle = 'Waiting for a LoRA.'
+        heartbeat(base, token, idle)
         claimed = run_once(base, token)
         if once:
             return
@@ -76,11 +80,16 @@ def run_once(base: str, token: str) -> bool:
             raise RuntimeError('This GPU worker trains SDXL LoRAs. Flux training is not available on it yet.')
         with tempfile.TemporaryDirectory(prefix='lora-forge-') as directory:
             dataset = Path(directory)
+            report(base, token, job_id, 4, 'preprocessing', 'Saving the photos on this computer.')
             download_dataset(base, token, job_id, dataset)
-            post_progress(base, token, job_id, 5, 'preprocessing')
+            report(base, token, job_id, 5, 'preprocessing', 'Photos are ready.')
             output = dataset / 'lora.safetensors'
             from trainer.train_sdxl import train_sdxl
-            train_sdxl(dataset, output, lambda percent: post_progress(base, token, job_id, percent, 'training'))
+            train_sdxl(
+                dataset,
+                output,
+                lambda percent, stage: report(base, token, job_id, percent, 'training' if percent >= 35 else 'preprocessing', stage),
+            )
             upload_model(base, token, job_id, output)
         print(f'Finished {job.get("name", job_id)}', flush=True)
     except Exception as error:
@@ -104,12 +113,37 @@ def download_dataset(base: str, token: str, job_id: str, dataset: Path) -> None:
     zip_path.unlink()
 
 
-def post_progress(base: str, token: str, job_id: str, progress: int, status: str) -> None:
+def heartbeat(base: str, token: str, stage: str) -> None:
+    try:
+        import torch
+        from trainer.model_cache import model_is_cached
+        free, total = torch.cuda.mem_get_info()
+        payload = {
+            'gpuName': torch.cuda.get_device_name(0),
+            'freeMb': int(free / (1024 * 1024)),
+            'totalMb': int(total / (1024 * 1024)),
+            'modelCached': model_is_cached(),
+            'stage': stage,
+        }
+        code, body = call('POST', f'{base}/api/worker/heartbeat', token, payload)
+        if code != 200:
+            print(message_from(body, code), flush=True)
+    except Exception as error:
+        print(f'Could not report the GPU: {error}', flush=True)
+
+
+def report(base: str, token: str, job_id: str, progress: int, status: str, stage: str) -> None:
+    print(f'{progress}% {stage}', flush=True)
+    heartbeat(base, token, stage)
+    post_progress(base, token, job_id, progress, status, stage)
+
+
+def post_progress(base: str, token: str, job_id: str, progress: int, status: str, stage: str) -> None:
     code, body = call(
         'POST',
         f'{base}/api/worker/jobs/{job_id}/progress',
         token,
-        {'progress': int(progress), 'status': status},
+        {'progress': int(progress), 'status': status, 'stage': stage},
     )
     if code != 200:
         raise RuntimeError(message_from(body, code))

@@ -2,20 +2,24 @@ import json
 import os
 from pathlib import Path
 
-MODEL_ID = os.environ.get('SDXL_MODEL_ID', 'stabilityai/stable-diffusion-xl-base-1.0').strip()
+from trainer.model_cache import model_id, model_is_cached, resolutions_for
+
+MODEL_ID = model_id()
 
 
 def train_sdxl(dataset: Path, output: Path, on_progress) -> None:
+    import torch
+    free_mb = torch.cuda.mem_get_info()[0] / (1024 * 1024) if torch.cuda.is_available() else 0
+    choices = resolutions_for(free_mb)
     last_error = None
-    for resolution in (1024, 768):
+    for resolution in choices:
         try:
             train_at(dataset, output, on_progress, resolution)
             return
         except RuntimeError as error:
             last_error = error
-            if 'out of memory' not in str(error).lower() or resolution == 768:
+            if 'out of memory' not in str(error).lower() or resolution == choices[-1]:
                 raise
-            import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
     if last_error:
@@ -48,35 +52,49 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
     learning_rate = float(os.environ.get('LORA_LR', '0.0001'))
     total_steps = max(len(pairs), len(pairs) * steps_per_image)
     device = torch.device('cuda')
-    on_progress(8)
+    on_progress(6, f'Training at {resolution} pixels so the model fits on the GPU.')
 
     def load(cls, subfolder: str, dtype):
-        try:
-            return cls.from_pretrained(MODEL_ID, subfolder=subfolder, torch_dtype=dtype, use_safetensors=True, variant='fp16')
-        except Exception:
-            return cls.from_pretrained(MODEL_ID, subfolder=subfolder, torch_dtype=dtype, use_safetensors=True)
+        cached = model_is_cached()
+        attempts = []
+        if cached:
+            attempts.append({'local_files_only': True, 'variant': 'fp16'})
+            attempts.append({'local_files_only': True})
+        attempts.append({'variant': 'fp16'})
+        attempts.append({})
+        last = None
+        for extra in attempts:
+            try:
+                return cls.from_pretrained(MODEL_ID, subfolder=subfolder, torch_dtype=dtype, use_safetensors=True, **extra)
+            except Exception as error:
+                last = error
+        raise RuntimeError(f'Could not load the {subfolder} model. {last}')
 
+    on_progress(8, 'Loading the text encoders onto the GPU.')
     tokenizer_one = CLIPTokenizer.from_pretrained(MODEL_ID, subfolder='tokenizer')
     tokenizer_two = CLIPTokenizer.from_pretrained(MODEL_ID, subfolder='tokenizer_2')
     text_encoder_one = load(CLIPTextModel, 'text_encoder', torch.float16).to(device)
     text_encoder_two = load(CLIPTextModelWithProjection, 'text_encoder_2', torch.float16).to(device)
     text_encoder_one.requires_grad_(False).eval()
     text_encoder_two.requires_grad_(False).eval()
+    on_progress(12, 'Reading the photo captions.')
     encoded = [encode_prompt(caption, tokenizer_one, tokenizer_two, text_encoder_one, text_encoder_two, device) for _path, caption in pairs]
     del text_encoder_one, text_encoder_two
     torch.cuda.empty_cache()
-    on_progress(18)
+    on_progress(18, 'Captions are ready.')
 
-    vae = load(AutoencoderKL, 'vae', torch.float32).to(device)
+    on_progress(20, 'Loading the image encoder onto the GPU.')
+    vae = load(AutoencoderKL, 'vae', torch.float16).to(device)
     vae.requires_grad_(False).eval()
     samples = []
     for index, (path, _caption) in enumerate(pairs):
         latent = encode_image(path, vae, resolution, device)
         samples.append((latent, encoded[index]))
-        on_progress(18 + int(12 * (index + 1) / len(pairs)))
+        on_progress(20 + int(10 * (index + 1) / len(pairs)), f'Reading photo {index + 1} of {len(pairs)}.')
     del vae
     torch.cuda.empty_cache()
 
+    on_progress(32, 'Loading the training network onto the GPU.')
     unet = load(UNet2DConditionModel, 'unet', torch.float16).to(device)
     unet.requires_grad_(False)
     unet.add_adapter(LoraConfig(r=rank, lora_alpha=rank, init_lora_weights='gaussian', target_modules=['to_q', 'to_k', 'to_v', 'to_out.0']))
@@ -86,7 +104,7 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
         parameter.data = parameter.data.float()
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate, weight_decay=1e-2)
     scheduler = DDPMScheduler.from_pretrained(MODEL_ID, subfolder='scheduler')
-    on_progress(35)
+    on_progress(35, 'Training the LoRA.')
 
     unet.train()
     for step in range(total_steps):
@@ -110,7 +128,7 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
         if step % 5 == 0 or step + 1 == total_steps:
-            on_progress(35 + int(60 * (step + 1) / total_steps))
+            on_progress(35 + int(60 * (step + 1) / total_steps), f'Training the LoRA, step {step + 1} of {total_steps}.')
 
     unet.eval()
     peft_state = get_peft_model_state_dict(unet)
@@ -122,7 +140,7 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
     saved = load_file(str(output))
     if not saved:
         raise RuntimeError('The .safetensors file was empty.')
-    on_progress(97)
+    on_progress(97, 'Saving the .safetensors file.')
 
 
 def encode_prompt(caption, tokenizer_one, tokenizer_two, text_encoder_one, text_encoder_two, device):
