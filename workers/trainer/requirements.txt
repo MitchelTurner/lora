@@ -1,5 +1,5 @@
 # Install the CUDA build of PyTorch before this file:
-# pip install torch --index-url https://download.pytorch.org/whl/cu124
+# pip install torch --index-url https://download.pytorch.org/whl/cu126
 requests>=2.32
 diffusers>=0.32.2
 transformers>=4.46.0

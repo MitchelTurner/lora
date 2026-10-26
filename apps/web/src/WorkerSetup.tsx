@@ -7,9 +7,9 @@ function safeToken(value: string): string {
 }
 
 function commands(origin: string, token: string) {
-  const windowsInstall = `cd /d %USERPROFILE% && curl -L --ssl-no-revoke -o lora.zip https://github.com/MitchelTurner/lora/archive/refs/heads/main.zip && tar -xf lora.zip && cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -m pip install torch --index-url https://download.pytorch.org/whl/cu124 && py -m pip install -r requirements.txt && py -m trainer --token ${token} --api ${origin}`;
+  const windowsInstall = `cd /d %USERPROFILE% && curl -L --ssl-no-revoke -o lora.zip https://github.com/MitchelTurner/lora/archive/refs/heads/main.zip && tar -xf lora.zip && cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -m pip install torch --index-url https://download.pytorch.org/whl/cu126 && py -m pip install -r requirements.txt && py -m trainer --token ${token} --api ${origin}`;
   const windowsStart = `cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -m trainer --token ${token} --api ${origin}`;
-  const unixInstall = `cd "$HOME" && git clone https://github.com/MitchelTurner/lora.git && cd "$HOME/lora/workers/trainer" && python3 -m pip install torch --index-url https://download.pytorch.org/whl/cu124 && python3 -m pip install -r requirements.txt && python3 -m trainer --token ${token} --api ${origin}`;
+  const unixInstall = `cd "$HOME" && git clone https://github.com/MitchelTurner/lora.git && cd "$HOME/lora/workers/trainer" && python3 -m pip install torch --index-url https://download.pytorch.org/whl/cu126 && python3 -m pip install -r requirements.txt && python3 -m trainer --token ${token} --api ${origin}`;
   const unixStart = `cd "$HOME/lora/workers/trainer" && python3 -m trainer --token ${token} --api ${origin}`;
   return { windowsInstall, windowsStart, unixInstall, unixStart };
 }
