@@ -52,6 +52,7 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
     learning_rate = float(os.environ.get('LORA_LR', '0.0001'))
     total_steps = max(len(pairs), len(pairs) * steps_per_image)
     device = torch.device('cuda')
+    math = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
     on_progress(6, f'Training at {resolution} pixels so the model fits on the GPU.')
 
     def load(cls, subfolder: str, dtype):
@@ -73,29 +74,43 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
     on_progress(8, 'Loading the text encoders onto the GPU.')
     tokenizer_one = CLIPTokenizer.from_pretrained(MODEL_ID, subfolder='tokenizer')
     tokenizer_two = CLIPTokenizer.from_pretrained(MODEL_ID, subfolder='tokenizer_2')
-    text_encoder_one = load(CLIPTextModel, 'text_encoder', torch.float16).to(device)
-    text_encoder_two = load(CLIPTextModelWithProjection, 'text_encoder_2', torch.float16).to(device)
+    text_encoder_one = load(CLIPTextModel, 'text_encoder', math).to(device)
+    text_encoder_two = load(CLIPTextModelWithProjection, 'text_encoder_2', math).to(device)
     text_encoder_one.requires_grad_(False).eval()
     text_encoder_two.requires_grad_(False).eval()
     on_progress(12, 'Reading the photo captions.')
-    encoded = [encode_prompt(caption, tokenizer_one, tokenizer_two, text_encoder_one, text_encoder_two, device) for _path, caption in pairs]
+    encoded = []
+    for _path, caption in pairs:
+        prompt_embeds, pooled = encode_prompt(caption, tokenizer_one, tokenizer_two, text_encoder_one, text_encoder_two, device)
+        if not torch.isfinite(prompt_embeds).all() or not torch.isfinite(pooled).all():
+            raise RuntimeError('A caption produced invalid numbers. Shorten that caption and submit the LoRA again.')
+        encoded.append((prompt_embeds.float(), pooled.float()))
     del text_encoder_one, text_encoder_two
     torch.cuda.empty_cache()
     on_progress(18, 'Captions are ready.')
 
     on_progress(20, 'Loading the image encoder onto the GPU.')
-    vae = load(AutoencoderKL, 'vae', torch.float16).to(device)
+    vae = load(AutoencoderKL, 'vae', math).to(device)
     vae.requires_grad_(False).eval()
+    cpu_vae = None
     samples = []
     for index, (path, _caption) in enumerate(pairs):
         latent = encode_image(path, vae, resolution, device)
-        samples.append((latent, encoded[index]))
+        if not torch.isfinite(latent).all():
+            if cpu_vae is None:
+                cpu_vae = AutoencoderKL.from_config(vae.config)
+                cpu_vae.load_state_dict({key: value.detach().float().cpu() for key, value in vae.state_dict().items()})
+                cpu_vae.eval()
+            latent = encode_image(path, cpu_vae, resolution, torch.device('cpu'))
+        if not torch.isfinite(latent).all():
+            raise RuntimeError(f'Photo {index + 1} produced invalid numbers. Remove that photo and submit the LoRA again.')
+        samples.append((latent.float(), encoded[index]))
         on_progress(20 + int(10 * (index + 1) / len(pairs)), f'Reading photo {index + 1} of {len(pairs)}.')
-    del vae
+    del vae, cpu_vae
     torch.cuda.empty_cache()
 
     on_progress(32, 'Loading the training network onto the GPU.')
-    unet = load(UNet2DConditionModel, 'unet', torch.float16).to(device)
+    unet = load(UNet2DConditionModel, 'unet', math).to(device)
     unet.requires_grad_(False)
     unet.add_adapter(LoraConfig(r=rank, lora_alpha=rank, init_lora_weights='gaussian', target_modules=['to_q', 'to_k', 'to_v', 'to_out.0']))
     unet.enable_gradient_checkpointing()
@@ -107,13 +122,18 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
     on_progress(35, 'Training the LoRA.')
 
     unet.train()
+    scaler = torch.amp.GradScaler('cuda', enabled=math == torch.float16)
+    skipped = 0
     for step in range(total_steps):
         latent, (prompt_embeds, pooled) = samples[step % len(samples)]
+        latent = latent.to(device=device, dtype=math)
+        prompt_embeds = prompt_embeds.to(device=device, dtype=math)
+        pooled = pooled.to(device=device, dtype=math)
         noise = torch.randn_like(latent)
         timestep = torch.randint(0, scheduler.config.num_train_timesteps, (1,), device=device).long()
         noisy = scheduler.add_noise(latent, noise, timestep)
-        time_ids = torch.tensor([[resolution, resolution, 0, 0, resolution, resolution]], device=device, dtype=prompt_embeds.dtype)
-        with torch.autocast(device_type='cuda', dtype=torch.float16):
+        time_ids = torch.tensor([[resolution, resolution, 0, 0, resolution, resolution]], device=device, dtype=math)
+        with torch.autocast(device_type='cuda', dtype=math):
             prediction = unet(
                 noisy,
                 timestep,
@@ -122,10 +142,21 @@ def train_at(dataset: Path, output: Path, on_progress, resolution: int) -> None:
             ).sample
         loss = F.mse_loss(prediction.float(), noise.float())
         if not torch.isfinite(loss):
-            raise RuntimeError('Training produced invalid numbers. Try a smaller LORA_RANK.')
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(trainable, 1.0)
-        optimizer.step()
+            skipped += 1
+            optimizer.zero_grad(set_to_none=True)
+            if skipped > 8:
+                raise RuntimeError('Training produced invalid numbers. The GPU math overflowed before a LoRA file could be saved.')
+            continue
+        if scaler.is_enabled():
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            optimizer.step()
         optimizer.zero_grad(set_to_none=True)
         if step % 5 == 0 or step + 1 == total_steps:
             on_progress(35 + int(60 * (step + 1) / total_steps), f'Training the LoRA, step {step + 1} of {total_steps}.')
@@ -179,7 +210,7 @@ def encode_image(path: Path, vae, resolution: int, device):
     pixels = pixels.to(device=device, dtype=vae.dtype)
     with torch.no_grad():
         latent = vae.encode(pixels).latent_dist.sample() * vae.config.scaling_factor
-    return latent.to(dtype=torch.float16)
+    return latent.float()
 
 
 def positive_int(name: str, default: int) -> int:
