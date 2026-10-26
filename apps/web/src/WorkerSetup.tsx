@@ -7,8 +7,8 @@ function safeToken(value: string): string {
 }
 
 function commands(origin: string, token: string) {
-  const windowsInstall = `cd /d %USERPROFILE% && curl -L --ssl-no-revoke -o lora.zip https://github.com/MitchelTurner/lora/archive/refs/heads/main.zip && tar -xf lora.zip && cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -m pip install torch --index-url https://download.pytorch.org/whl/cu126 && py -m pip install -r requirements.txt && py -m trainer --token ${token} --api ${origin}`;
-  const windowsStart = `cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -m trainer --token ${token} --api ${origin}`;
+  const windowsInstall = `cd /d %USERPROFILE% && curl -L --ssl-no-revoke -o lora.zip https://github.com/MitchelTurner/lora/archive/refs/heads/main.zip && tar -xf lora.zip && cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -3.11 -m pip install torch --index-url https://download.pytorch.org/whl/cu124 && py -3.11 -m pip install -r requirements.txt && py -3.11 -m trainer --token ${token} --api ${origin}`;
+  const windowsStart = `cd /d %USERPROFILE%\\lora-main\\workers\\trainer && py -3.11 -m trainer --token ${token} --api ${origin}`;
   const unixInstall = `cd "$HOME" && git clone https://github.com/MitchelTurner/lora.git && cd "$HOME/lora/workers/trainer" && python3 -m pip install torch --index-url https://download.pytorch.org/whl/cu126 && python3 -m pip install -r requirements.txt && python3 -m trainer --token ${token} --api ${origin}`;
   const unixStart = `cd "$HOME/lora/workers/trainer" && python3 -m trainer --token ${token} --api ${origin}`;
   return { windowsInstall, windowsStart, unixInstall, unixStart };
@@ -80,7 +80,7 @@ export function WorkerSetup({ flux = false }: { flux?: boolean }) {
     <div>
       <div className="space-y-2 text-sm leading-relaxed text-ink/70">
         <p>This page cannot start the GPU. Leave Command Prompt open on the computer with the NVIDIA card. The worker trains the next SDXL job and uploads the .safetensors file. The percentage stays at 0% until that window is running.</p>
-        <p>On Windows, open Command Prompt. Type the token below, copy the Windows line, paste it as one line, and press Enter once. Git is not required. The line downloads the project as a zip.</p>
+        <p>On Windows, open Command Prompt. Type the token below, copy the Windows line, paste it as one line, and press Enter once. The line uses Python 3.11, because the newest Python has no CUDA build of PyTorch. Git is not required. The line downloads the project as a zip.</p>
         <p>On the API service, set <span className="font-semibold text-ink">WORKER_TOKEN</span> to the same letters and numbers, then restart that service.</p>
         {flux && <p className="text-sm text-red-800" role="alert">This worker trains SDXL. A Flux job stays waiting, because this computer cannot finish it.</p>}
       </div>

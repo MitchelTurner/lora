@@ -52,7 +52,7 @@ def ensure_gpu() -> None:
     except ImportError as error:
         raise SystemExit(
             'Install the CUDA build of PyTorch, then start the worker again.\n'
-            'pip install torch --index-url https://download.pytorch.org/whl/cu126'
+            'py -3.11 -m pip install torch --index-url https://download.pytorch.org/whl/cu124'
         ) from error
     if not torch.cuda.is_available():
         raise SystemExit(
